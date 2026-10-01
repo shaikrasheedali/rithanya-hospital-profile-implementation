@@ -1,0 +1,479 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ---------- Enums are stored as plain Strings on SQLite ----------
+// Role: SUPERADMIN | ADMIN | STAFF
+// Gender: MALE | FEMALE | OTHER
+// PatientType: INPATIENT | OUTPATIENT
+// StayStatus: ADMITTED | DISCHARGED | TRANSFERRED
+// OrderStatus: PENDING | PAID | PROCESSING | DISPATCHED | DELIVERED | CANCELLED
+// PaymentMethod: COD | UPI | CARD | NET_BANKING
+// TransactionType: CREDIT | DEBIT
+// CorporateEntity: RITHANYA_HOSPITAL | RVBC
+// GalleryType: IMAGE | VIDEO | IFRAME_YOUTUBE | IFRAME_FACEBOOK | IFRAME_INSTAGRAM
+// DpdpStatus: PENDING | MATCHED_AND_ERASED | MANUALLY_RESOLVED | REJECTED
+// MediaKind: IMAGE | VIDEO
+
+model User {
+  id           String    @id @default(uuid())
+  username     String    @unique @map("username")
+  email        String    @unique @map("email")
+  passwordHash String    @map("password_hash")
+  role         String    @default("STAFF") @map("role")
+  fullName     String    @map("full_name")
+  isActive     Boolean   @default(true) @map("is_active")
+  createdById  String?   @map("created_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
+  access       UserModuleAccess?
+  auditLogs    AuditLog[]
+
+  @@map("users")
+  @@index([role])
+}
+
+model UserModuleAccess {
+  id                String   @id @default(uuid())
+  userId            String   @unique @map("user_id")
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  canManageEMR      Boolean  @default(false) @map("can_manage_emr")
+  canManageBloodBank Boolean @default(false) @map("can_manage_blood_bank")
+  canManageCMS      Boolean  @default(false) @map("can_manage_cms")
+  canManageStore    Boolean  @default(false) @map("can_manage_store")
+  canManageHR       Boolean  @default(false) @map("can_manage_hr")
+  canManageFinance  Boolean  @default(false) @map("can_manage_finance")
+  canManageDPDP     Boolean  @default(false) @map("can_manage_dpdp")
+  canManageSettings Boolean  @default(false) @map("can_manage_settings")
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("user_module_access")
+}
+
+model ClinicalCategory {
+  id          String    @id @default(uuid())
+  name        String    @unique @map("name")
+  description String?   @map("description")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
+  patients    Patient[]
+
+  @@map("clinical_categories")
+}
+
+model Patient {
+  id                String    @id @default(uuid())
+  uhid              String    @unique @map("uhid")
+  fullName          String    @map("full_name")
+  contactNumber     String    @map("contact_number")
+  age               Int       @map("age")
+  gender            String    @map("gender")
+  bloodGroup        String    @map("blood_group")
+  patientType       String    @map("patient_type")
+  clinicalCondition String    @default("") @map("clinical_condition")
+  allergies         String    @default("") @map("allergies")
+  consentPhotoUrl   String?   @map("consent_photo_url")
+  categoryId        String?   @map("category_id")
+  category          ClinicalCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  isDischarged      Boolean   @default(false) @map("is_discharged")
+  isArchived        Boolean   @default(false) @map("is_archived")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+  stays             InpatientStay[]
+  vitals            VitalLog[]
+
+  @@map("patients")
+  @@index([patientType])
+  @@index([isDischarged])
+}
+
+model InpatientStay {
+  id             String    @id @default(uuid())
+  patientId      String    @map("patient_id")
+  patient        Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  roomBedNumber  String    @map("room_bed_number")
+  admissionDate  DateTime  @default(now()) @map("admission_date")
+  dischargeDate  DateTime? @map("discharge_date")
+  status         String    @default("ADMITTED") @map("status")
+  dischargeNotes String?   @map("discharge_notes")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@map("inpatient_stays")
+  @@index([patientId])
+}
+
+model VitalLog {
+  id                  String   @id @default(uuid())
+  patientId           String   @map("patient_id")
+  patient             Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  recordedAt          DateTime @default(now()) @map("recorded_at")
+  haemoglobin         Float    @map("haemoglobin")
+  spO2                Float    @map("spo2")
+  pulse               Int      @map("pulse")
+  fastingGlucose      Float?   @map("fasting_glucose")
+  postPrandialGlucose Float?   @map("post_prandial_glucose")
+  hbA1c               Float?   @map("hba1c")
+  bpSystolic          Int      @map("bp_systolic")
+  bpDiastolic         Int      @map("bp_diastolic")
+  serumFerritin       Float?   @map("serum_ferritin")
+  clinicalNotes       String?  @map("clinical_notes")
+  recordedByStaff     String?  @map("recorded_by_staff")
+
+  @@map("vital_logs")
+  @@index([patientId, recordedAt])
+}
+
+model BloodStock {
+  id               String   @id @default(uuid())
+  bloodGroup       String   @unique @map("blood_group")
+  groupCategory    String   @map("group_category")
+  colorCode        String   @map("color_code")
+  wholeBloodUnits  Int      @default(0) @map("whole_blood_units")
+  plasmaUnits      Int      @default(0) @map("plasma_units")
+  lastUpdated      DateTime @default(now()) @map("last_updated")
+
+  @@map("blood_stock")
+}
+
+model MediaAsset {
+  id          String      @id @default(uuid())
+  filename    String      @unique @map("filename")
+  originalName String     @map("original_name")
+  mimeType    String      @default("image/webp") @map("mime_type")
+  kind        String      @default("IMAGE") @map("kind")
+  sizeInBytes Int         @map("size_in_bytes")
+  url         String      @map("url")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  links       MediaLink[]
+
+  @@map("media_assets")
+}
+
+model MediaLink {
+  id         String     @id @default(uuid())
+  entityType String     @map("entity_type")
+  entityId   String     @map("entity_id")
+  mediaId    String     @map("media_id")
+  media      MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+  sortOrder  Int        @default(0) @map("sort_order")
+
+  @@map("media_links")
+  @@unique([entityType, entityId, mediaId])
+  @@index([entityType, entityId])
+  @@index([mediaId])
+}
+
+model Specialty {
+  id           String   @id @default(uuid())
+  title        String   @map("title")
+  slug         String   @unique @map("slug")
+  shortSummary String   @map("short_summary")
+  contentHtml  String   @default("") @map("content_html")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("specialties")
+}
+
+model Treatment {
+  id           String   @id @default(uuid())
+  title        String   @map("title")
+  slug         String   @unique @map("slug")
+  category     String   @default("General") @map("category")
+  isFlagship   Boolean  @default(false) @map("is_flagship")
+  shortSummary String   @map("short_summary")
+  contentHtml  String   @default("") @map("content_html")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("treatments")
+}
+
+model Service {
+  id           String   @id @default(uuid())
+  title        String   @map("title")
+  slug         String   @unique @map("slug")
+  category     String   @default("Outpatient") @map("category")
+  shortSummary String   @map("short_summary")
+  contentHtml  String   @default("") @map("content_html")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("services")
+}
+
+model Doctor {
+  id                 String   @id @default(uuid())
+  fullName           String   @map("full_name")
+  slug               String   @unique @map("slug")
+  qualifications     String   @map("qualifications")
+  designation        String   @map("designation")
+  department         String   @map("department")
+  consultationTimings String  @default("") @map("consultation_timings")
+  isVisiting         Boolean  @default(false) @map("is_visiting")
+  biographyHtml      String   @default("") @map("biography_html")
+  experienceYears    Int      @default(0) @map("experience_years")
+  sortOrder          Int      @default(0) @map("sort_order")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("doctors")
+}
+
+model InsuranceProvider {
+  id              String   @id @default(uuid())
+  name            String   @map("name")
+  schemeType      String   @map("scheme_type")
+  descriptionHtml String   @default("") @map("description_html")
+  sortOrder       Int      @default(0) @map("sort_order")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("insurance_providers")
+}
+
+model GalleryItem {
+  id         String   @id @default(uuid())
+  title      String   @map("title")
+  mediaType  String   @default("IMAGE") @map("media_type")
+  embedCode  String   @default("") @map("embed_code")
+  caption    String   @default("") @map("caption")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("gallery_items")
+}
+
+model BlogPost {
+  id          String   @id @default(uuid())
+  title       String   @map("title")
+  slug        String   @unique @map("slug")
+  authorName  String   @default("Rithanya Medical Editorial") @map("author_name")
+  category    String   @default("Diabetes Management") @map("category")
+  excerpt     String   @map("excerpt")
+  contentHtml String   @default("") @map("content_html")
+  isPublished Boolean  @default(true) @map("is_published")
+  publishedAt DateTime @default(now()) @map("published_at")
+  sortOrder   Int      @default(0) @map("sort_order")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("blog_posts")
+}
+
+model Testimonial {
+  id          String   @id @default(uuid())
+  patientName String   @map("patient_name")
+  location    String   @default("Khammam") @map("location")
+  treatment   String   @default("") @map("treatment")
+  rating      Int      @default(5) @map("rating")
+  quote       String   @map("quote")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("testimonials")
+}
+
+model Product {
+  id                String      @id @default(uuid())
+  name              String      @map("name")
+  slug              String      @unique @map("slug")
+  category          String      @default("Wellness") @map("category")
+  description       String      @default("") @map("description")
+  price             Float       @map("price")
+  stockUnits        Int         @default(0) @map("stock_units")
+  isPrescriptionReq Boolean     @default(false) @map("is_prescription_req")
+  sortOrder         Int         @default(0) @map("sort_order")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @default(now()) @updatedAt @map("updated_at")
+  orderItems        OrderItem[]
+
+  @@map("products")
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  orderNumber     String      @unique @map("order_number")
+  customerName    String      @map("customer_name")
+  phoneNumber     String      @map("phone_number")
+  shippingAddress String      @map("shipping_address")
+  pinCode         String      @default("") @map("pin_code")
+  totalAmount     Float       @map("total_amount")
+  status          String      @default("PENDING") @map("status")
+  paymentMethod   String      @default("COD") @map("payment_method")
+  isPaid          Boolean     @default(false) @map("is_paid")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @default(now()) @updatedAt @map("updated_at")
+  items           OrderItem[]
+
+  @@map("orders")
+  @@index([status])
+}
+
+model OrderItem {
+  id          String  @id @default(uuid())
+  orderId     String  @map("order_id")
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String  @map("product_id")
+  product     Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productName String  @default("") @map("product_name")
+  quantity    Int     @default(1) @map("quantity")
+  unitPrice   Float   @map("unit_price")
+
+  @@map("order_items")
+}
+
+model Employee {
+  id                      String          @id @default(uuid())
+  entity                  String          @default("RITHANYA_HOSPITAL") @map("entity")
+  fullName                String          @map("full_name")
+  designation             String          @map("designation")
+  department              String          @map("department")
+  shiftSchedule           String          @default("General") @map("shift_schedule")
+  contactNumber           String          @default("") @map("contact_number")
+  monthlyFixedBaseSalary  Float           @map("monthly_fixed_base_salary")
+  isActive                Boolean         @default(true) @map("is_active")
+  createdAt               DateTime        @default(now()) @map("created_at")
+  updatedAt               DateTime        @default(now()) @updatedAt @map("updated_at")
+  payrollRecords          PayrollRecord[]
+
+  @@map("employees")
+  @@index([entity])
+}
+
+model PayrollRecord {
+  id               String    @id @default(uuid())
+  employeeId       String    @map("employee_id")
+  employee         Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  month            Int       @map("month")
+  year             Int       @map("year")
+  baseSalary       Float     @map("base_salary")
+  calendarDays     Int       @map("calendar_days")
+  lopDays          Int       @default(0) @map("lop_days")
+  paidDays         Int       @map("paid_days")
+  lopDeduction     Float     @map("lop_deduction")
+  allowances       Float     @default(0) @map("allowances")
+  otherDeductions  Float     @default(0) @map("other_deductions")
+  netPayable       Float     @map("net_payable")
+  authorizerSignSvg String?  @map("authorizer_sign_svg")
+  authorizerName   String?   @map("authorizer_name")
+  signedAt         DateTime? @map("signed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@map("payroll_records")
+  @@unique([employeeId, month, year])
+}
+
+model ExpenseCategory {
+  id          String         @id @default(uuid())
+  entity      String         @default("RITHANYA_HOSPITAL") @map("entity")
+  name        String         @map("name")
+  description String?        @map("description")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  entries     ExpenseLedger[]
+
+  @@map("expense_categories")
+  @@unique([entity, name])
+  @@index([entity])
+}
+
+model ExpenseLedger {
+  id          String           @id @default(uuid())
+  entity      String           @default("RITHANYA_HOSPITAL") @map("entity")
+  type        String           @map("type")
+  itemName    String           @map("item_name")
+  description String?          @map("description")
+  categoryId  String?          @map("category_id")
+  category    ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  vendorPayee String           @map("vendor_payee")
+  amount      Float            @map("amount")
+  invoiceRef  String?          @map("invoice_ref")
+  method      String           @map("method")
+  entryDate   DateTime         @default(now()) @map("entry_date")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  @@map("expense_ledger")
+  @@index([entity])
+  @@index([entryDate])
+}
+
+model DpdpErasureRequest {
+  id                String   @id @default(uuid())
+  trackingCode      String   @unique @map("tracking_code")
+  fullName          String   @map("full_name")
+  phoneNumber       String   @map("phone_number")
+  identificationRef String?  @map("identification_ref")
+  recordsNature     String   @default("") @map("records_nature")
+  requestDetails    String   @map("request_details")
+  identityProofFile String?  @map("identity_proof_file")
+  status            String   @default("PENDING") @map("status")
+  resolutionNotes   String?  @map("resolution_notes")
+  matchedPatientId  String?  @map("matched_patient_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("dpdp_erasure_requests")
+}
+
+model Appointment {
+  id            String   @id @default(uuid())
+  fullName      String   @map("full_name")
+  phone         String   @map("phone")
+  department    String   @default("") @map("department")
+  preferredDate String   @default("") @map("preferred_date")
+  message       String   @default("") @map("message")
+  source        String   @default("WEBSITE") @map("source")
+  status        String   @default("NEW") @map("status")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("appointments")
+}
+
+model HospitalSetting {
+  id                          String   @id @default("PRIMARY_CONFIG") @map("id")
+  legalName                   String   @default("Rithanya Hospital") @map("legal_name")
+  clinicalTagline             String   @default("Dedicated Thalassemia Daycare, Diabetology & 24/7 Emergency Care") @map("clinical_tagline")
+  emergencyHotline            String   @default("8328581019") @map("emergency_hotline")
+  secondaryHotline            String?  @default("9054177824") @map("secondary_hotline")
+  whatsappNumber              String   @default("918328581019") @map("whatsapp_number")
+  email                       String   @default("care@rithanyahospital.com") @map("email")
+  criticalBloodAlertThreshold Int      @default(3) @map("critical_blood_alert_threshold")
+  physicalAddress             String   @default("") @map("physical_address")
+  opdTimings                  String   @default("Open 24 Hours | Daycare & OPD: 9:00 AM - 8:00 PM") @map("opd_timings")
+  noticeBanner                String   @default("") @map("notice_banner")
+  seoPageTitle                String   @default("") @map("seo_page_title")
+  metaDescription             String   @default("") @map("meta_description")
+  targetKeywords              String   @default("") @map("target_keywords")
+  canonicalUrl                String   @default("https://rithanyahospital.com") @map("canonical_url")
+  robotsIndexFollow           Boolean  @default(true) @map("robots_index_follow")
+  faviconUrl                  String?  @map("favicon_url")
+  socialShareThumbnailUrl     String?  @map("social_share_thumbnail_url")
+  updatedAt                   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("hospital_settings")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String   @map("action")
+  entity    String   @map("entity")
+  entityId  String?  @map("entity_id")
+  details   String?  @map("details")
+  userId    String?  @map("user_id")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userName  String?  @map("user_name")
+  timestamp DateTime @default(now()) @map("timestamp")
+
+  @@map("audit_logs")
+  @@index([timestamp])
+}
