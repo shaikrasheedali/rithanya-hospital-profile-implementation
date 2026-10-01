@@ -8,11 +8,13 @@
     "server"
   ],
   "scripts": {
+    "postinstall": "npm --prefix server run prisma:generate",
     "install:all": "npm --prefix client install && npm --prefix server install",
     "dev": "npm --prefix server run dev",
     "build": "npm --prefix client run build && npm --prefix server run build",
     "build:client": "npm --prefix client run build",
     "build:server": "npm --prefix server run build",
+    "prestart": "npm --prefix server run prisma:generate",
     "start": "npm --prefix server run start",
     "prisma:generate": "npm --prefix server run prisma:generate",
     "db:migrate": "npm --prefix server run db:migrate",
