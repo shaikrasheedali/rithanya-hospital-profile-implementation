@@ -46,10 +46,10 @@ function createClient(): PrismaClient {
     user: config.user,
     password: config.password,
     database: config.database,
-    connectTimeout: 8000,
-    acquireTimeout: 10000,
-    idleTimeout: 30000,
-    connectionLimit: 25,
+    connectTimeout: 1500,
+    acquireTimeout: 1500,
+    idleTimeout: 15000,
+    connectionLimit: 10,
   };
   // If socket path exists and host is local, prefer unix socket on Linux
   if (config.socketPath && (config.host === "127.0.0.1" || config.host === "localhost")) {
@@ -70,11 +70,29 @@ export function isDbOnCooldown(): boolean {
 }
 
 export function reportDbError(err?: unknown): void {
-  dbCooldownUntil = Date.now() + 15_000;
+  // Cooldown for 45 seconds to protect performance from hanging pool timeouts
+  dbCooldownUntil = Date.now() + 45_000;
+  if (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[db] Entered cooldown for 45s due to DB error: ${msg.slice(0, 160)}`);
+  }
 }
 
 export function reportDbSuccess(): void {
   dbCooldownUntil = 0;
+}
+
+/** Guard any raw DB promise with a strict timeout so it never blocks the event loop or request threads */
+export async function withDbTimeout<T>(p: Promise<T>, ms = 2000): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Database call timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([p, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export const prisma: PrismaClient = g.__rhPrisma ?? createClient();

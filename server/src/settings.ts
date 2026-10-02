@@ -1,4 +1,4 @@
-import { prisma, isDbOnCooldown, reportDbError, reportDbSuccess } from "./db.js";
+import { prisma, isDbOnCooldown, reportDbError, reportDbSuccess, withDbTimeout } from "./db.js";
 
 export const DEFAULT_ADDRESS =
   "Opposite Old LIC Office, Wyra Road, Nehru Nagar, Khammam HO, Khammam – 507001, Telangana, India";
@@ -8,7 +8,7 @@ export const DEFAULT_SETTINGS = {
   legalName: "Rithanya Hospital",
   clinicalTagline: "Dedicated Thalassemia Daycare, Diabetology & 24/7 Emergency Care",
   emergencyHotline: "8328581019",
-  secondaryHotline: "9054177824",
+  secondaryHotline: "9054177824" as string | null,
   whatsappNumber: "918328581019",
   email: "care@rithanyahospital.com",
   criticalBloodAlertThreshold: 3,
@@ -27,27 +27,26 @@ export const DEFAULT_SETTINGS = {
   socialShareThumbnailUrl: null as string | null,
 };
 
+let cachedSettings = { ...DEFAULT_SETTINGS };
+let settingsLoaded = false;
+
+export function updateCachedSettings(partial: Partial<typeof DEFAULT_SETTINGS>): void {
+  cachedSettings = { ...cachedSettings, ...partial };
+}
+
 export async function getSettings() {
-  if (isDbOnCooldown()) return DEFAULT_SETTINGS;
+  if (settingsLoaded || isDbOnCooldown()) return cachedSettings;
   try {
-    const row = await prisma.hospitalSetting.findUnique({ where: { id: "PRIMARY_CONFIG" } });
+    const row = await withDbTimeout(prisma.hospitalSetting.findUnique({ where: { id: "PRIMARY_CONFIG" } }), 1500);
     if (row) {
       reportDbSuccess();
-      return row;
-    }
-    try {
-      const created = await prisma.hospitalSetting.create({ data: DEFAULT_SETTINGS });
-      reportDbSuccess();
-      return created;
-    } catch {
-      const again = await prisma.hospitalSetting.findUnique({ where: { id: "PRIMARY_CONFIG" } });
-      if (!again) return DEFAULT_SETTINGS;
-      reportDbSuccess();
-      return again;
+      cachedSettings = { ...cachedSettings, ...row };
+      settingsLoaded = true;
+      return cachedSettings;
     }
   } catch (err) {
     reportDbError(err);
-    console.warn("[settings] Database offline or query timed out, using DEFAULT_SETTINGS:", err instanceof Error ? err.message : err);
-    return DEFAULT_SETTINGS;
+    console.warn("[settings] Database query timed out, using cached settings:", err instanceof Error ? err.message : err);
   }
+  return cachedSettings;
 }

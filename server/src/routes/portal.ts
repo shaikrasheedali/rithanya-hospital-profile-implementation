@@ -1,7 +1,7 @@
 import { Router } from "express";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { prisma } from "../db.js";
+import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "../db.js";
 import { requireAuth, getUser, getEntity, audit } from "../auth.js";
 import { isCollection } from "../cms.js";
 import { createItem, updateItem, deleteItem, listCollection } from "../cms.js";
@@ -13,6 +13,7 @@ import { getSettings } from "../settings.js";
 import { loadPatients, loadCategories } from "../emr.js";
 import { retentionState } from "../retention.js";
 import { FALLBACK_BLOOD_STOCK } from "../fallbackData.js";
+import { getBloodStock } from "../content.js";
 
 const router = Router();
 
@@ -234,35 +235,41 @@ router.get("/r/:resource", requireAuth(), async (req, res) => {
     res.status(403).json({ error: "You do not have access to this module" });
     return;
   }
+  if (isDbOnCooldown()) {
+    res.json({ items: [], entity: getEntity(req) });
+    return;
+  }
   try {
     switch (resource) {
       case "categories": res.json({ items: await loadCategories() }); return;
-      case "appointments": res.json({ items: await prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 300 }) }); return;
+      case "appointments": res.json({ items: await withDbTimeout(prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 300 }), 2000) }); return;
       case "employees": {
         const entity = getEntity(req);
-        const items = await prisma.employee.findMany({ where: { entity }, orderBy: { fullName: "asc" } });
+        const items = await withDbTimeout(prisma.employee.findMany({ where: { entity }, orderBy: { fullName: "asc" } }), 2000);
         res.json({ items, entity });
         return;
       }
       case "expense-categories": {
         const entity = getEntity(req);
-        res.json({ items: await prisma.expenseCategory.findMany({ where: { entity }, orderBy: { name: "asc" } }), entity });
+        const items = await withDbTimeout(prisma.expenseCategory.findMany({ where: { entity }, orderBy: { name: "asc" } }), 2000);
+        res.json({ items, entity });
         return;
       }
       case "ledger": {
         const entity = getEntity(req);
-        const entries = await prisma.expenseLedger.findMany({ where: { entity }, orderBy: { entryDate: "desc" }, take: 500, include: { category: true } });
+        const entries = await withDbTimeout(prisma.expenseLedger.findMany({ where: { entity }, orderBy: { entryDate: "desc" }, take: 500, include: { category: true } }), 2000);
         res.json({ items: entries.map((e) => ({ ...e, categoryName: e.category?.name ?? null })), entity });
         return;
       }
       case "users": {
-        const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });
+        const users = await withDbTimeout(prisma.user.findMany({ orderBy: { createdAt: "asc" } }), 2000);
         res.json({ items: users.map((u) => ({ id: u.id, username: u.username, email: u.email, fullName: u.fullName, role: u.role, isActive: u.isActive })) });
         return;
       }
       default: res.status(405).json({ error: "List not supported for this resource" }); return;
     }
   } catch (e) {
+    reportDbError(e);
     console.warn(`[portal:r:${resource}] List failed:`, e);
     res.json({ items: [] });
   }
@@ -271,17 +278,37 @@ router.get("/r/:resource", requireAuth(), async (req, res) => {
 // ---------- Page-data endpoints (what Next.js pages fetched via direct DB) ----------
 router.get("/dashboard", requireAuth(), async (req, res) => {
   const user = getUser(req);
+  if (isDbOnCooldown()) {
+    res.json({
+      user,
+      stats: {
+        patients: 0,
+        appointments: 0,
+        orders: 0,
+        products: 0,
+        dpdpPending: 0,
+        stock: FALLBACK_BLOOD_STOCK,
+      },
+      recentAppointments: [],
+      recentOrders: [],
+    });
+    return;
+  }
   try {
-    const [patients, appointments, orders, stock, dpdpPending, products] = await Promise.all([
-      prisma.patient.count().catch(() => 0),
-      prisma.appointment.count().catch(() => 0),
-      prisma.order.count().catch(() => 0),
-      prisma.bloodStock.findMany().catch(() => []),
-      prisma.dpdpErasureRequest.count({ where: { status: "PENDING" } }).catch(() => 0),
-      prisma.product.count().catch(() => 0),
-    ]);
-    const recentAppointments = await prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 8 }).catch(() => []);
-    const recentOrders = await prisma.order.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { items: true } }).catch(() => []);
+    const [patients, appointments, orders, stock, dpdpPending, products, recentAppointments, recentOrders] =
+      await withDbTimeout(
+        Promise.all([
+          prisma.patient.count().catch(() => 0),
+          prisma.appointment.count().catch(() => 0),
+          prisma.order.count().catch(() => 0),
+          prisma.bloodStock.findMany().catch(() => []),
+          prisma.dpdpErasureRequest.count({ where: { status: "PENDING" } }).catch(() => 0),
+          prisma.product.count().catch(() => 0),
+          prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 8 }).catch(() => []),
+          prisma.order.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { items: true } }).catch(() => []),
+        ]),
+        2000,
+      );
     res.json({
       user,
       stats: {
@@ -296,6 +323,7 @@ router.get("/dashboard", requireAuth(), async (req, res) => {
       recentOrders,
     });
   } catch (err) {
+    reportDbError(err);
     console.warn("[portal:dashboard] Error loading metrics, returning safe fallback:", err);
     res.json({
       user,
@@ -317,6 +345,10 @@ router.get("/patients", requireAuth("emr"), async (req, res) => {
   const type = req.query.type as string | undefined;
   const discharged = req.query.discharged === "1" || req.query.discharged === "true";
   const archived = req.query.archived === "1" || req.query.archived === "true";
+  if (isDbOnCooldown()) {
+    res.json({ patients: [], categories: [] });
+    return;
+  }
   try {
     res.json({
       patients: await loadPatients({
@@ -327,15 +359,21 @@ router.get("/patients", requireAuth("emr"), async (req, res) => {
       categories: await loadCategories(),
     });
   } catch (err) {
+    reportDbError(err);
     console.warn("[portal:patients] Error loading patients:", err);
     res.json({ patients: [], categories: [] });
   }
 });
 
 router.get("/appointments", requireAuth("emr"), async (_req, res) => {
+  if (isDbOnCooldown()) {
+    res.json({ items: [] });
+    return;
+  }
   try {
-    res.json({ items: await prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 300 }) });
+    res.json({ items: await withDbTimeout(prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 300 }), 1500) });
   } catch (err) {
+    reportDbError(err);
     console.warn("[portal:appointments] Query failed, returning empty list:", err);
     res.json({ items: [] });
   }
@@ -343,26 +381,27 @@ router.get("/appointments", requireAuth("emr"), async (_req, res) => {
 
 router.get("/blood-stock", requireAuth("bloodbank"), async (_req, res) => {
   try {
-    let [stock, settings] = await Promise.all([
-      prisma.bloodStock.findMany().catch(() => []),
+    const [stock, settings] = await Promise.all([
+      getBloodStock(),
       getSettings(),
     ]);
-    if (!stock || !stock.length) stock = FALLBACK_BLOOD_STOCK as any;
-    const order = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-", "O", "A", "B", "AB"];
-    stock.sort((a, b) => order.indexOf(a.bloodGroup) - order.indexOf(b.bloodGroup));
     res.json({ stock, threshold: settings.criticalBloodAlertThreshold });
   } catch (err) {
-    console.warn("[portal:blood-stock] Query failed, returning fallback:", err);
     const settings = await getSettings();
     res.json({ stock: FALLBACK_BLOOD_STOCK, threshold: settings.criticalBloodAlertThreshold });
   }
 });
 
 router.get("/orders", requireAuth("store"), async (_req, res) => {
+  if (isDbOnCooldown()) {
+    res.json({ items: [] });
+    return;
+  }
   try {
-    const orders = await prisma.order.findMany({ orderBy: { createdAt: "desc" }, take: 300, include: { items: true } });
+    const orders = await withDbTimeout(prisma.order.findMany({ orderBy: { createdAt: "desc" }, take: 300, include: { items: true } }), 1500);
     res.json({ items: orders });
   } catch (err) {
+    reportDbError(err);
     console.warn("[portal:orders] Query failed, returning empty list:", err);
     res.json({ items: [] });
   }
@@ -370,111 +409,216 @@ router.get("/orders", requireAuth("store"), async (_req, res) => {
 
 router.get("/employees", requireAuth("hr"), async (req, res) => {
   const entity = getEntity(req);
-  res.json({ items: await prisma.employee.findMany({ where: { entity }, orderBy: { fullName: "asc" } }), entity });
+  if (isDbOnCooldown()) {
+    res.json({ items: [], entity });
+    return;
+  }
+  try {
+    res.json({ items: await withDbTimeout(prisma.employee.findMany({ where: { entity }, orderBy: { fullName: "asc" } }), 1500), entity });
+  } catch (err) {
+    reportDbError(err);
+    res.json({ items: [], entity });
+  }
 });
 
 router.get("/payroll", requireAuth("hr"), async (req, res) => {
   const month = Number(req.query.month ?? new Date().getMonth() + 1);
   const year = Number(req.query.year ?? new Date().getFullYear());
   const entity = getEntity(req);
-  const employees = await prisma.employee.findMany({ where: { isActive: true, entity }, orderBy: { fullName: "asc" } });
-  const records = await prisma.payrollRecord.findMany({ where: { month, year, employee: { entity } }, include: { employee: true } });
-  res.json({ employees, records, month, year, entity });
+  if (isDbOnCooldown()) {
+    res.json({ employees: [], records: [], month, year, entity });
+    return;
+  }
+  try {
+    const employees = await withDbTimeout(prisma.employee.findMany({ where: { isActive: true, entity }, orderBy: { fullName: "asc" } }), 1500);
+    const records = await withDbTimeout(prisma.payrollRecord.findMany({ where: { month, year, employee: { entity } }, include: { employee: true } }), 1500);
+    res.json({ employees, records, month, year, entity });
+  } catch (err) {
+    reportDbError(err);
+    res.json({ employees: [], records: [], month, year, entity });
+  }
 });
 
 router.get("/payslip/:id", requireAuth("hr"), async (req, res) => {
-  const record = await prisma.payrollRecord.findUnique({ where: { id: param(req.params.id) }, include: { employee: true } });
-  if (!record) {
-    res.status(404).json({ error: "Payslip not found" });
+  if (isDbOnCooldown()) {
+    res.status(404).json({ error: "Payslip not available offline" });
     return;
   }
-  res.json({ record, settings: await getSettings() });
+  try {
+    const record = await withDbTimeout(prisma.payrollRecord.findUnique({ where: { id: param(req.params.id) }, include: { employee: true } }), 1500);
+    if (!record) {
+      res.status(404).json({ error: "Payslip not found" });
+      return;
+    }
+    res.json({ record, settings: await getSettings() });
+  } catch (err) {
+    reportDbError(err);
+    res.status(404).json({ error: "Payslip not found" });
+  }
 });
 
 router.get("/ledger", requireAuth("finance"), async (req, res) => {
   const entity = getEntity(req);
-  const [entries, categories] = await Promise.all([
-    prisma.expenseLedger.findMany({ where: { entity }, orderBy: { entryDate: "desc" }, take: 500, include: { category: true } }),
-    prisma.expenseCategory.findMany({ where: { entity }, orderBy: { name: "asc" } }),
-  ]);
-  res.json({ items: entries.map((e) => ({ ...e, categoryName: e.category?.name ?? null })), categories, entity });
+  if (isDbOnCooldown()) {
+    res.json({ items: [], categories: [], entity });
+    return;
+  }
+  try {
+    const [entries, categories] = await withDbTimeout(
+      Promise.all([
+        prisma.expenseLedger.findMany({ where: { entity }, orderBy: { entryDate: "desc" }, take: 500, include: { category: true } }),
+        prisma.expenseCategory.findMany({ where: { entity }, orderBy: { name: "asc" } }),
+      ]),
+      2000,
+    );
+    res.json({ items: entries.map((e) => ({ ...e, categoryName: e.category?.name ?? null })), categories, entity });
+  } catch (err) {
+    reportDbError(err);
+    res.json({ items: [], categories: [], entity });
+  }
 });
 
 router.get("/expense-categories", requireAuth("finance"), async (req, res) => {
   const entity = getEntity(req);
-  res.json({ items: await prisma.expenseCategory.findMany({ where: { entity }, orderBy: { name: "asc" } }), entity });
+  if (isDbOnCooldown()) {
+    res.json({ items: [], entity });
+    return;
+  }
+  try {
+    res.json({ items: await withDbTimeout(prisma.expenseCategory.findMany({ where: { entity }, orderBy: { name: "asc" } }), 1500), entity });
+  } catch (err) {
+    reportDbError(err);
+    res.json({ items: [], entity });
+  }
 });
 
 router.get("/finance-overview", requireAuth("finance"), async (req, res) => {
   const entity = getEntity(req);
-  const entries = await prisma.expenseLedger.findMany({ where: { entity }, orderBy: { entryDate: "desc" }, take: 1000, include: { category: true } });
-  const byMonth = new Map<string, { credit: number; debit: number }>();
-  for (const e of entries) {
-    const k = new Date(e.entryDate).toISOString().slice(0, 7);
-    const cur = byMonth.get(k) ?? { credit: 0, debit: 0 };
-    if (e.type === "CREDIT") cur.credit += e.amount;
-    else cur.debit += e.amount;
-    byMonth.set(k, cur);
+  if (isDbOnCooldown()) {
+    res.json({
+      totals: { credit: 0, debit: 0, net: 0 },
+      months: [],
+      byCategory: [],
+      retention: retentionState,
+      entity,
+    });
+    return;
   }
-  const months = Array.from(byMonth.entries()).sort().slice(-6).map(([month, v]) => ({ month, ...v, net: v.credit - v.debit }));
-  const byCategory = new Map<string, number>();
-  for (const e of entries) {
-    if (e.type !== "DEBIT") continue;
-    const k = e.category?.name ?? "Uncategorised";
-    byCategory.set(k, (byCategory.get(k) ?? 0) + e.amount);
+  try {
+    const entries = await withDbTimeout(prisma.expenseLedger.findMany({ where: { entity }, orderBy: { entryDate: "desc" }, take: 1000, include: { category: true } }), 2000);
+    const byMonth = new Map<string, { credit: number; debit: number }>();
+    for (const e of entries) {
+      const k = new Date(e.entryDate).toISOString().slice(0, 7);
+      const cur = byMonth.get(k) ?? { credit: 0, debit: 0 };
+      if (e.type === "CREDIT") cur.credit += e.amount;
+      else cur.debit += e.amount;
+      byMonth.set(k, cur);
+    }
+    const months = Array.from(byMonth.entries()).sort().slice(-6).map(([month, v]) => ({ month, ...v, net: v.credit - v.debit }));
+    const byCategory = new Map<string, number>();
+    for (const e of entries) {
+      if (e.type !== "DEBIT") continue;
+      const k = e.category?.name ?? "Uncategorised";
+      byCategory.set(k, (byCategory.get(k) ?? 0) + e.amount);
+    }
+    const totalCredit = entries.filter((e) => e.type === "CREDIT").reduce((s, e) => s + e.amount, 0);
+    const totalDebit = entries.filter((e) => e.type === "DEBIT").reduce((s, e) => s + e.amount, 0);
+    res.json({
+      totals: { credit: totalCredit, debit: totalDebit, net: totalCredit - totalDebit },
+      months,
+      byCategory: Array.from(byCategory.entries()).map(([name, total]) => ({ name, total })),
+      retention: retentionState,
+      entity,
+    });
+  } catch (err) {
+    reportDbError(err);
+    res.json({
+      totals: { credit: 0, debit: 0, net: 0 },
+      months: [],
+      byCategory: [],
+      retention: retentionState,
+      entity,
+    });
   }
-  const totalCredit = entries.filter((e) => e.type === "CREDIT").reduce((s, e) => s + e.amount, 0);
-  const totalDebit = entries.filter((e) => e.type === "DEBIT").reduce((s, e) => s + e.amount, 0);
-  res.json({
-    totals: { credit: totalCredit, debit: totalDebit, net: totalCredit - totalDebit },
-    months,
-    byCategory: Array.from(byCategory.entries()).map(([name, total]) => ({ name, total })),
-    retention: retentionState,
-    entity,
-  });
 });
 
 router.get("/dpdp-requests", requireAuth("dpdp"), async (_req, res) => {
-  res.json({ items: await prisma.dpdpErasureRequest.findMany({ orderBy: { createdAt: "desc" }, take: 300 }) });
+  if (isDbOnCooldown()) {
+    res.json({ items: [] });
+    return;
+  }
+  try {
+    res.json({ items: await withDbTimeout(prisma.dpdpErasureRequest.findMany({ orderBy: { createdAt: "desc" }, take: 300 }), 1500) });
+  } catch (err) {
+    reportDbError(err);
+    res.json({ items: [] });
+  }
 });
 
 router.get("/users", requireAuth("access"), async (_req, res) => {
-  const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });
-  res.json({
-    items: users.map((u) => ({ id: u.id, username: u.username, email: u.email, fullName: u.fullName, role: u.role, isActive: u.isActive })),
-  });
+  if (isDbOnCooldown()) {
+    res.json({ items: [] });
+    return;
+  }
+  try {
+    const users = await withDbTimeout(prisma.user.findMany({ orderBy: { createdAt: "asc" } }), 1500);
+    res.json({
+      items: users.map((u) => ({ id: u.id, username: u.username, email: u.email, fullName: u.fullName, role: u.role, isActive: u.isActive })),
+    });
+  } catch (err) {
+    reportDbError(err);
+    res.json({ items: [] });
+  }
 });
 
 router.get("/permissions", requireAuth("access"), async (_req, res) => {
-  const users = await prisma.user.findMany({ orderBy: { fullName: "asc" } });
-  const access = await prisma.userModuleAccess.findMany();
-  const map = new Map(access.map((a) => [a.userId, a]));
-  res.json({
-    items: users.map((u) => ({
-      id: u.id,
-      username: u.username,
-      fullName: u.fullName,
-      role: u.role,
-      modules: {
-        emr: map.get(u.id)?.canManageEMR ?? false,
-        bloodbank: map.get(u.id)?.canManageBloodBank ?? false,
-        cms: map.get(u.id)?.canManageCMS ?? false,
-        store: map.get(u.id)?.canManageStore ?? false,
-        hr: map.get(u.id)?.canManageHR ?? false,
-        finance: map.get(u.id)?.canManageFinance ?? false,
-        dpdp: map.get(u.id)?.canManageDPDP ?? false,
-        settings: map.get(u.id)?.canManageSettings ?? false,
-      },
-    })),
-  });
+  if (isDbOnCooldown()) {
+    res.json({ items: [] });
+    return;
+  }
+  try {
+    const users = await withDbTimeout(prisma.user.findMany({ orderBy: { fullName: "asc" } }), 1500);
+    const access = await withDbTimeout(prisma.userModuleAccess.findMany(), 1500);
+    const map = new Map(access.map((a) => [a.userId, a]));
+    res.json({
+      items: users.map((u) => ({
+        id: u.id,
+        username: u.username,
+        fullName: u.fullName,
+        role: u.role,
+        modules: {
+          emr: map.get(u.id)?.canManageEMR ?? false,
+          bloodbank: map.get(u.id)?.canManageBloodBank ?? false,
+          cms: map.get(u.id)?.canManageCMS ?? false,
+          store: map.get(u.id)?.canManageStore ?? false,
+          hr: map.get(u.id)?.canManageHR ?? false,
+          finance: map.get(u.id)?.canManageFinance ?? false,
+          dpdp: map.get(u.id)?.canManageDPDP ?? false,
+          settings: map.get(u.id)?.canManageSettings ?? false,
+        },
+      })),
+    });
+  } catch (err) {
+    reportDbError(err);
+    res.json({ items: [] });
+  }
+});
+
+router.get("/audit-logs", requireAuth("settings"), async (_req, res) => {
+  if (isDbOnCooldown()) {
+    res.json({ items: [] });
+    return;
+  }
+  try {
+    res.json({ items: await withDbTimeout(prisma.auditLog.findMany({ orderBy: { timestamp: "desc" }, take: 40 }), 1500) });
+  } catch (err) {
+    reportDbError(err);
+    res.json({ items: [] });
+  }
 });
 
 router.get("/settings", requireAuth("settings"), async (_req, res) => {
   res.json({ settings: await getSettings() });
-});
-
-router.get("/audit-logs", requireAuth("settings"), async (_req, res) => {
-  res.json({ items: await prisma.auditLog.findMany({ orderBy: { timestamp: "desc" }, take: 40 }) });
 });
 
 // ---------- Private file serving ----------

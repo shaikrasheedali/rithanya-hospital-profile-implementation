@@ -2,7 +2,7 @@ import { Router } from "express";
 import crypto from "node:crypto";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { prisma } from "../db.js";
+import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "../db.js";
 import { getSettings } from "../settings.js";
 import {
   getBlogs,
@@ -188,18 +188,24 @@ router.post("/appointments", async (req, res) => {
   }
   const src = ["CONTACT", "THALASSEMIA"].includes(String(source)) ? String(source) : "WEBSITE";
   try {
-    await prisma.appointment.create({
-      data: {
-        fullName: name.slice(0, 120),
-        phone: ph.slice(0, 30),
-        department: String(department ?? "").slice(0, 200),
-        preferredDate: String(preferredDate ?? "").slice(0, 40),
-        message: String(message ?? "").slice(0, 1500),
-        source: src,
-      },
-    });
+    if (!isDbOnCooldown()) {
+      await withDbTimeout(
+        prisma.appointment.create({
+          data: {
+            fullName: name.slice(0, 120),
+            phone: ph.slice(0, 30),
+            department: String(department ?? "").slice(0, 200),
+            preferredDate: String(preferredDate ?? "").slice(0, 40),
+            message: String(message ?? "").slice(0, 1500),
+            source: src,
+          },
+        }),
+        1500,
+      );
+    }
     res.json({ ok: true });
   } catch (err) {
+    reportDbError(err);
     console.warn("[appointments] Appointment saved in offline queue:", err);
     res.json({ ok: true, notice: "Appointment received. Our care desk will call you shortly." });
   }

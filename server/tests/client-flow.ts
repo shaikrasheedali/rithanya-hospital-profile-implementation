@@ -273,7 +273,79 @@ async function runClientFlowTests() {
     assert.ok(Array.isArray(dataMedia.assets), "Portal media assets is array");
     console.log(`✓ Portal media API passed (${dataMedia.assets.length} assets returned)`);
 
-    // 12. Frontend SPA index & Navbar button ordering verification
+    // 11h. Update specialty spec-1 via CMS PUT (Testing user's exact issue scenario)
+    console.log("\n[Test 11h] Testing CMS Item Update fetch('PUT /api/portal/cms/specialties/spec-1')...");
+    const resUpdateSpec = await fetch(`${BASE}/api/portal/cms/specialties/spec-1`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader,
+      },
+      body: JSON.stringify({
+        title: "Diabetology & Advanced Endocrinology Center",
+        shortSummary: "Comprehensive care for Type 1, Type 2 and gestational diabetes with HbA1c screening.",
+        contentHtml: "<p>Updated diabetology content with new protocols.</p>",
+        sortOrder: 0,
+        mediaIds: ["m-glucose-finger"],
+      }),
+    });
+    assert.strictEqual(resUpdateSpec.status, 200, "CMS PUT /api/portal/cms/specialties/spec-1 returned 200 (not 404)");
+    const dataUpdateSpec: any = await resUpdateSpec.json();
+    assert.strictEqual(dataUpdateSpec.ok, true, "Response indicated ok: true");
+    console.log("✓ Updating spec-1 succeeded with status 200 (User 404 issue fixed!)");
+
+    // 11i. Verify public API immediately reflects the updated spec-1 item
+    console.log("[Test 11i] Testing Public Reflect for Updated Specialty...");
+    const resPublicSpec = await fetch(`${BASE}/api/public/clinical?type=specialties`);
+    assert.strictEqual(resPublicSpec.status, 200, "Clinical specialties returned 200");
+    const dataPublicSpec: any = await resPublicSpec.json();
+    const updatedSpec = dataPublicSpec.items.find((x: any) => x.id === "spec-1");
+    assert.ok(updatedSpec, "Updated item spec-1 must exist in public list");
+    assert.strictEqual(updatedSpec.title, "Diabetology & Advanced Endocrinology Center", "Public item title matches updated value");
+    console.log(`✓ Public API immediately reflects updated item: "${updatedSpec.title}"`);
+
+    // 11j. Test CMS Create: POST /api/portal/cms/specialties
+    console.log("\n[Test 11j] Testing CMS Item Create fetch('POST /api/portal/cms/specialties')...");
+    const resCreateSpec = await fetch(`${BASE}/api/portal/cms/specialties`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader,
+      },
+      body: JSON.stringify({
+        title: "Pediatric Hematology Care",
+        shortSummary: "Dedicated care for childhood blood disorders.",
+        contentHtml: "<p>Advanced pediatric hematology care.</p>",
+        sortOrder: 99,
+        mediaIds: [],
+      }),
+    });
+    assert.strictEqual(resCreateSpec.status, 200, "CMS create item returned 200");
+    const dataCreateSpec: any = await resCreateSpec.json();
+    assert.strictEqual(dataCreateSpec.ok, true, "Create item ok is true");
+    const createdId = dataCreateSpec.item?.id;
+    console.log(`✓ CMS create item passed (created id: ${createdId})`);
+
+    // 11k. Test CMS Delete: DELETE /api/portal/cms/specialties/:id
+    console.log("[Test 11k] Testing CMS Item Delete fetch('DELETE /api/portal/cms/specialties/:id')...");
+    const resDeleteSpec = await fetch(`${BASE}/api/portal/cms/specialties/${createdId}`, {
+      method: "DELETE",
+      headers: { Cookie: cookieHeader },
+    });
+    assert.strictEqual(resDeleteSpec.status, 200, "CMS delete item returned 200");
+    const dataDeleteSpec: any = await resDeleteSpec.json();
+    assert.strictEqual(dataDeleteSpec.ok, true, "Delete item ok is true");
+    console.log("✓ CMS delete item passed");
+
+    // 11l. Performance & Throughput Benchmark (/api/public/home)
+    console.log("\n[Test 11l] Benchmarking Public Home Response Latency...");
+    const t0 = performance.now();
+    const resBench = await fetch(`${BASE}/api/public/home`);
+    const t1 = performance.now();
+    assert.strictEqual(resBench.status, 200, "Home endpoint returned 200");
+    const latency = Math.round(t1 - t0);
+    console.log(`✓ Home page response latency: ${latency}ms (blazing fast near real-time performance)`);
+    assert.ok(latency < 100, `Latency must be < 100ms (was ${latency}ms)`);
     console.log("\n[Test 12] Testing Frontend SPA and Navbar ordering...");
     const resIndex = await fetch(`${BASE}/`);
     assert.strictEqual(resIndex.status, 200, "Frontend index.html served with 200");

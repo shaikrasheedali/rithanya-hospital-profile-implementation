@@ -3,12 +3,14 @@ import crypto from "node:crypto";
 import path from "node:path";
 import fs from "node:fs/promises";
 import sharp from "sharp";
-import { prisma } from "./db.js";
+import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
 import { audit, computeModules, hashPassword, type ModuleKey, type Role, type SessionUser } from "./auth.js";
 import { decryptField, encryptField, encryptJson } from "./crypto.js";
 import { PRIVATE_DIR } from "./media.js";
 import { computeMonthlyPayroll, daysInMonth } from "./payroll.js";
 import { phoneDigits } from "./utils.js";
+import { updateCachedSettings, DEFAULT_SETTINGS } from "./settings.js";
+import { updateInMemoryBloodStock } from "./content.js";
 
 export class ApiError extends Error {
   constructor(message: string, public status = 400) {
@@ -233,16 +235,28 @@ const bloodbank: Handler = {
     const stocks = Array.isArray(body.stocks) ? body.stocks : [];
     if (!stocks.length) throw new ApiError("No stock values supplied");
     const colors: Record<string, string> = { O: "SKY_BLUE", A: "YELLOW", B: "RED", AB: "WHITE" };
-    for (const s of stocks) {
-      const g = oneOf(s.bloodGroup, ["O", "A", "B", "AB", "O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"] as const, "blood group");
-      const wb = num(s.wholeBloodUnits, "Whole blood units", { min: 0, max: 9999 })!;
-      const pl = num(s.plasmaUnits, "Plasma units", { min: 0, max: 9999 })!;
-      const cat = g.replace(/[+-]/g, "");
-      await prisma.bloodStock.upsert({
-        where: { bloodGroup: g },
-        create: { bloodGroup: g, groupCategory: cat, colorCode: colors[cat] ?? "WHITE", wholeBloodUnits: wb, plasmaUnits: pl },
-        update: { wholeBloodUnits: wb, plasmaUnits: pl, lastUpdated: new Date() },
-      });
+    // Update in-memory stock immediately for instantaneous public reflect
+    updateInMemoryBloodStock(stocks);
+    if (!isDbOnCooldown()) {
+      try {
+        for (const s of stocks) {
+          const g = oneOf(s.bloodGroup, ["O", "A", "B", "AB", "O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"] as const, "blood group");
+          const wb = num(s.wholeBloodUnits, "Whole blood units", { min: 0, max: 9999 })!;
+          const pl = num(s.plasmaUnits, "Plasma units", { min: 0, max: 9999 })!;
+          const cat = g.replace(/[+-]/g, "");
+          await withDbTimeout(
+            prisma.bloodStock.upsert({
+              where: { bloodGroup: g },
+              create: { bloodGroup: g, groupCategory: cat, colorCode: colors[cat] ?? "WHITE", wholeBloodUnits: wb, plasmaUnits: pl },
+              update: { wholeBloodUnits: wb, plasmaUnits: pl, lastUpdated: new Date() },
+            }),
+            1500,
+          );
+        }
+      } catch (err) {
+        reportDbError(err);
+        console.warn("[resources:bloodbank] DB upsert skipped:", err instanceof Error ? err.message : err);
+      }
     }
     await audit(
       user,
@@ -672,7 +686,22 @@ const settings: Handler = {
     if (has("faviconUrl")) partial.faviconUrl = str(body.faviconUrl, 400) || null;
     if (has("socialShareThumbnailUrl")) partial.socialShareThumbnailUrl = str(body.socialShareThumbnailUrl, 400) || null;
     if (!Object.keys(partial).length) throw new ApiError("Nothing to update");
-    await prisma.hospitalSetting.update({ where: { id: "PRIMARY_CONFIG" }, data: partial as never });
+    updateCachedSettings(partial);
+    if (!isDbOnCooldown()) {
+      try {
+        await withDbTimeout(
+          prisma.hospitalSetting.upsert({
+            where: { id: "PRIMARY_CONFIG" },
+            create: { ...DEFAULT_SETTINGS, ...partial },
+            update: partial as never,
+          }),
+          2000,
+        );
+      } catch (err) {
+        reportDbError(err);
+        console.warn("[resources:settings] DB upsert skipped:", err instanceof Error ? err.message : err);
+      }
+    }
     await audit(user, "UPDATE_SETTINGS", "HospitalSetting", "PRIMARY_CONFIG", Object.keys(partial).join(", "));
     return { ok: true };
   },

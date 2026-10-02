@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
-import { prisma, isDbOnCooldown, reportDbError } from "./db.js";
+import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
 import { getSettings } from "./settings.js";
-import { IMAGE_DIR } from "./media.js";
+import { IMAGE_DIR, inMemoryAssetStore } from "./media.js";
 
 export type AssetRow = {
   id: string;
@@ -20,10 +20,13 @@ export type AssetRow = {
 export async function listAssets(): Promise<AssetRow[]> {
   if (!isDbOnCooldown()) {
     try {
-      const assets = await prisma.mediaAsset.findMany({
-        include: { links: true },
-        orderBy: { createdAt: "desc" },
-      });
+      const assets = await withDbTimeout(
+        prisma.mediaAsset.findMany({
+          include: { links: true },
+          orderBy: { createdAt: "desc" },
+        }),
+        1500,
+      );
       const s = await getSettings();
       return assets.map((a) => {
         const linkedTo = Array.from(new Set(a.links.map((l) => l.entityType)));
@@ -49,27 +52,52 @@ export async function listAssets(): Promise<AssetRow[]> {
     }
   }
 
-  // Graceful fallback from disk: scan IMAGE_DIR
+  // Graceful fallback from in-memory assets & disk: scan IMAGE_DIR
+  const list: AssetRow[] = [];
+  const seenUrls = new Set<string>();
+
+  for (const a of inMemoryAssetStore.values()) {
+    if (!seenUrls.has(a.url)) {
+      seenUrls.add(a.url);
+      list.push({
+        id: a.id,
+        filename: a.filename,
+        originalName: a.originalName,
+        mimeType: a.mimeType,
+        kind: a.kind,
+        sizeInBytes: a.sizeInBytes,
+        url: a.url,
+        createdAt: a.createdAt,
+        refs: 1,
+        linkedTo: ["active"],
+      });
+    }
+  }
+
   try {
     if (fsSync.existsSync(IMAGE_DIR)) {
       const files = await fs.readdir(IMAGE_DIR);
-      return files
-        .filter((f) => f.endsWith(".webp") || f.endsWith(".png") || f.endsWith(".jpg"))
-        .map((f, idx) => ({
-          id: `disk-${idx}-${f}`,
-          filename: f,
-          originalName: f,
-          mimeType: "image/webp",
-          kind: "IMAGE" as const,
-          sizeInBytes: 2048,
-          url: `/api/media/${f}`,
-          createdAt: new Date(),
-          refs: 0,
-          linkedTo: [],
-        }));
+      for (const [idx, f] of files.entries()) {
+        const url = `/api/media/${f}`;
+        if (!seenUrls.has(url) && (f.endsWith(".webp") || f.endsWith(".png") || f.endsWith(".jpg"))) {
+          seenUrls.add(url);
+          list.push({
+            id: `disk-${idx}-${f}`,
+            filename: f,
+            originalName: f,
+            mimeType: "image/webp",
+            kind: "IMAGE" as const,
+            sizeInBytes: 2048,
+            url,
+            createdAt: new Date(),
+            refs: 0,
+            linkedTo: [],
+          });
+        }
+      }
     }
   } catch (diskErr) {
     console.warn("[media-admin] Fallback disk scan error:", diskErr);
   }
-  return [];
+  return list;
 }

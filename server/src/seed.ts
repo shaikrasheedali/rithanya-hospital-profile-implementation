@@ -3,7 +3,7 @@ import path from "node:path";
 import { prisma } from "./db.js";
 import { hashPassword, computeModules } from "./auth.js";
 import { encryptField, encryptJson } from "./crypto.js";
-import { setEntityMedia, type EntityType } from "./media.js";
+import { setEntityMedia, registerAssetInMemory, type EntityType } from "./media.js";
 import { DEFAULT_SETTINGS } from "./settings.js";
 import { slugify } from "./utils.js";
 
@@ -83,6 +83,7 @@ async function seedMedia(): Promise<Record<string, string>> {
       },
       update: { sizeInBytes: size },
     });
+    registerAssetInMemory(row as any);
     ids[file.replace(/\.(webp|mp4)$/, "")] = row.id;
   }
   return ids;

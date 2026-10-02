@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import type { Request, Response, NextFunction } from "express";
 import { hash, verify } from "@node-rs/argon2";
-import { prisma, isDbOnCooldown, reportDbError } from "./db.js";
+import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
 
 export type Role = "SUPERADMIN" | "ADMIN" | "STAFF";
 export type ModuleKey = "emr" | "bloodbank" | "cms" | "store" | "hr" | "finance" | "dpdp" | "settings" | "access";
@@ -208,19 +208,23 @@ export async function audit(
   entityId?: string | null,
   details?: string,
 ) {
+  if (isDbOnCooldown()) return;
   try {
-    await prisma.auditLog.create({
-      data: {
-        action,
-        entity,
-        entityId: entityId ?? null,
-        details: details ?? null,
-        userId: user?.id ?? null,
-        userName: user?.fullName ?? "System",
-      },
-    });
+    await withDbTimeout(
+      prisma.auditLog.create({
+        data: {
+          action,
+          entity,
+          entityId: entityId ?? null,
+          details: details ?? null,
+          userId: user?.id ?? null,
+          userName: user?.fullName ?? "System",
+        },
+      }),
+      1000,
+    );
   } catch (e) {
-    console.error("[audit] failed", e);
+    reportDbError(e);
   }
 }
 
