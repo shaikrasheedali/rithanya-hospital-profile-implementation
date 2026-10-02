@@ -6,7 +6,7 @@ import { Btn, Modal, api, useToast } from "@/components/portal/ui";
 import { SafeImg, SafeVideo } from "@/components/site/ui";
 import type { MediaRef } from "@/lib/utils";
 
-export type Asset = MediaRef & { sizeInBytes: number; refs?: number; linkedTo?: string[]; createdAt?: string };
+export type Asset = MediaRef & { sizeInBytes: number; refs?: number; linkedTo?: string[]; createdAt?: string; filename?: string };
 
 export const fmtSize = (n: number) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
@@ -78,12 +78,29 @@ export function MediaPickerModal({
       const res = await fetch("/api/portal/media", { method: "POST", body: fd });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Upload failed");
-      const added = json.assets as Asset[];
+      const added = ((json.assets ?? []) as Asset[]).map((a) => ({
+        id: a.filename || a.id,
+        url: a.url || `/api/media/${a.filename || a.id}`,
+        kind: a.kind || "IMAGE",
+        originalName: a.originalName || a.filename || a.id,
+        sizeInBytes: a.sizeInBytes || 2048,
+      }));
       if (json.errors?.length) toast(json.errors.join("; "), "err");
       toast(`${added.length} file(s) uploaded & optimised`);
-      await load();
-      setSel((s) => (single ? [added[0].id] : [...s, ...added.map((a) => a.id)]));
+
+      // Merge into local assets state immediately so it is available without waiting
+      setAssets((prev) => {
+        const existingIds = new Set(prev.map((p) => p.id));
+        const newOnes = added.filter((a) => !existingIds.has(a.id));
+        return [...newOnes, ...prev];
+      });
+
+      const addedIds = added.map((a) => a.id);
+      setSel((s) => (single ? [addedIds[0]] : Array.from(new Set([...addedIds, ...s]))));
       setTab("library");
+
+      // Non-blocking background load
+      void load();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Upload failed", "err");
     } finally {
@@ -92,6 +109,37 @@ export function MediaPickerModal({
   }
 
   const toggle = (id: string) => setSel((s) => (single ? [id] : s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+
+  const handlePickSelected = () => {
+    const picked: Asset[] = [];
+    for (const id of sel) {
+      const found = assets.find(
+        (a) =>
+          a.id === id ||
+          a.filename === id ||
+          a.url === id ||
+          a.url.endsWith(id) ||
+          a.id.replace(/^media-/, "") === id.replace(/^media-/, "") ||
+          Boolean(a.filename && id.includes(a.filename))
+      );
+      if (found) {
+        picked.push(found);
+      } else {
+        const clean = id.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
+        const isVideo = clean.endsWith(".mp4") || clean.endsWith(".webm") || clean.endsWith(".mov");
+        picked.push({
+          id: clean,
+          url: clean.startsWith("/") ? clean : `/api/media/${clean}`,
+          kind: isVideo ? "VIDEO" : "IMAGE",
+          originalName: clean,
+          sizeInBytes: 2048,
+        });
+      }
+    }
+    if (picked.length) {
+      onPick(picked);
+    }
+  };
 
   return (
     <Modal
@@ -102,7 +150,7 @@ export function MediaPickerModal({
         <>
           <span className="mr-auto self-center text-base text-ink/70">{sel.length} selected</span>
           <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-          <Btn disabled={!sel.length} onClick={() => onPick(sel.map((id) => assets.find((a) => a.id === id)!).filter(Boolean))}>Use selected</Btn>
+          <Btn disabled={!sel.length} onClick={handlePickSelected}>Use selected</Btn>
         </>
       }
     >
@@ -190,6 +238,13 @@ export function MediaField({
     [c[i], c[j]] = [c[j], c[i]];
     onChange(c);
   };
+  const setAsCover = (index: number) => {
+    if (index === 0) return;
+    const next = [...value];
+    const [chosen] = next.splice(index, 1);
+    next.unshift(chosen);
+    onChange(next);
+  };
   return (
     <div className={`rounded-xl border p-4 ${error ? "border-alert bg-red-50/40" : "border-line bg-canvas"}`}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -206,11 +261,27 @@ export function MediaField({
       ) : (
         <ul className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5">
           {value.map((m, i) => (
-            <li key={m.id} className="group relative overflow-hidden rounded-lg border border-line bg-white">
+            <li key={m.id} className="group relative overflow-hidden rounded-lg border border-line bg-white shadow-sm">
               <Thumb m={m} className="aspect-square w-full" />
-              {i === 0 && <span className="absolute left-1 top-1 rounded bg-gold px-1.5 py-0.5 text-xs font-bold text-navy">Cover</span>}
+              {i === 0 ? (
+                <span className="absolute left-1.5 top-1.5 rounded bg-gold px-2 py-0.5 text-xs font-bold text-navy shadow">Cover</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAsCover(i)}
+                  className="absolute left-1.5 top-1.5 rounded bg-navy/80 hover:bg-gold hover:text-navy px-1.5 py-0.5 text-xs font-semibold text-white shadow transition-colors"
+                  title="Click to set as cover image"
+                >
+                  Set cover
+                </button>
+              )}
               <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-navy/85 px-1 py-1 text-white opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                 <button type="button" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move earlier" className="rounded p-1 hover:bg-white/20 disabled:opacity-30"><ArrowLeft className="h-4 w-4" /></button>
+                {i !== 0 && (
+                  <button type="button" onClick={() => setAsCover(i)} title="Make cover" className="rounded px-1.5 py-0.5 text-xs font-semibold hover:bg-gold hover:text-navy">
+                    Cover
+                  </button>
+                )}
                 <button type="button" onClick={() => onChange(value.filter((x) => x.id !== m.id))} aria-label="Remove media" className="rounded p-1 hover:bg-alert"><X className="h-4 w-4" /></button>
                 <button type="button" onClick={() => move(i, 1)} disabled={i === value.length - 1} aria-label="Move later" className="rounded p-1 hover:bg-white/20 disabled:opacity-30"><ArrowRight className="h-4 w-4" /></button>
               </div>

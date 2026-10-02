@@ -40,7 +40,23 @@ export function resolveMediaFilePath(rawName: string): { fullPath: string; mime:
     .replace(/^disk-\d+-/, "")
     .replace(/^disk-/, "")
     .replace(/^media-/, "");
-  const ext = path.extname(cleanFilename).toLowerCase();
+  let ext = path.extname(cleanFilename).toLowerCase();
+  let candidateFilename = cleanFilename;
+
+  if (!ext) {
+    const seedDir = getSeedDir();
+    const probeExts = [".webp", ".png", ".jpg", ".jpeg", ".mp4", ".webm"];
+    for (const probe of probeExts) {
+      const probeName = cleanFilename + probe;
+      const isImg = [".webp", ".png", ".jpg", ".jpeg"].includes(probe);
+      const testDir = isImg ? IMAGE_DIR : VIDEO_DIR;
+      if (fs.existsSync(path.join(testDir, probeName)) || (seedDir && fs.existsSync(path.join(seedDir, probeName)))) {
+        ext = probe;
+        candidateFilename = probeName;
+        break;
+      }
+    }
+  }
 
   const isImage = [".webp", ".png", ".jpg", ".jpeg"].includes(ext);
   const isVideo = [".mp4", ".webm", ".mov", ".ogv"].includes(ext);
@@ -52,14 +68,14 @@ export function resolveMediaFilePath(rawName: string): { fullPath: string; mime:
   // 1. Try rawFilename in primaryDir
   let full = path.join(primaryDir, rawFilename);
   if (!fs.existsSync(full)) {
-    // 2. Try cleanFilename in primaryDir
-    full = path.join(primaryDir, cleanFilename);
+    // 2. Try candidateFilename in primaryDir
+    full = path.join(primaryDir, candidateFilename);
   }
 
   // 3. Fallback to seed directory
   const seedDir = getSeedDir();
   if (!fs.existsSync(full) && seedDir) {
-    const seedCandidate = path.join(seedDir, cleanFilename);
+    const seedCandidate = path.join(seedDir, candidateFilename);
     if (fs.existsSync(seedCandidate)) full = seedCandidate;
   }
 

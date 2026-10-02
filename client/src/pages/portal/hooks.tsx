@@ -1,11 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-export function usePortalData<T>(url: string): { data: T | null; loading: boolean; error: string | null } {
+export function usePortalData<T>(url: string): { data: T | null; loading: boolean; error: string | null; reload: () => void } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [nonce, setNonce] = useState(0);
+
+  const reload = useCallback(() => {
+    setNonce((n) => n + 1);
+  }, []);
 
   useEffect(() => {
+    if (!url) return;
     let alive = true;
     setLoading(true);
     fetch(url)
@@ -25,9 +31,9 @@ export function usePortalData<T>(url: string): { data: T | null; loading: boolea
     return () => {
       alive = false;
     };
-  }, [url]);
+  }, [url, nonce]);
 
-  return { data, loading, error };
+  return { data, loading, error, reload };
 }
 
 export function LoadingCard() {

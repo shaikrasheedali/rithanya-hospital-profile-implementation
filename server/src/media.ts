@@ -79,7 +79,7 @@ export async function saveUploadFile(file: UploadedFile): Promise<MediaAssetReco
     const processed = await sharp(buf)
       .rotate()
       .resize({ width: 2560, height: 2560, fit: "inside", withoutEnlargement: true })
-      .webp({ quality: 82, effort: 4, alphaQuality: 85 })
+      .webp({ quality: 82, effort: 2, alphaQuality: 85 })
       .toBuffer();
     if (processed.length > MAX_BYTES) throw new Error("Processed image exceeds the strict 10MB threshold.");
     const filename = `${Date.now()}-${hashPart}.webp`;
@@ -87,7 +87,7 @@ export async function saveUploadFile(file: UploadedFile): Promise<MediaAssetReco
     await fs.writeFile(path.join(IMAGE_DIR, filename), processed);
 
     const assetRecord: MediaAssetRecord = {
-      id: `media-${Date.now()}-${hashPart}`,
+      id: filename,
       filename,
       originalName: file.originalname,
       mimeType: "image/webp",
@@ -97,28 +97,33 @@ export async function saveUploadFile(file: UploadedFile): Promise<MediaAssetReco
       createdAt: new Date(),
     };
     registerAssetInMemory(assetRecord);
+    inMemoryAssetStore.set(filename, assetRecord);
+    inMemoryAssetStore.set(`media-${filename}`, assetRecord);
+    inMemoryAssetStore.set(`media-${Date.now()}-${hashPart}`, assetRecord);
+    inMemoryAssetStore.set(`${Date.now()}-${hashPart}`, assetRecord);
 
     if (!isDbOnCooldown()) {
-      try {
-        const created = await withDbTimeout(
-          prisma.mediaAsset.create({
-            data: {
-              filename,
-              originalName: file.originalname,
-              mimeType: "image/webp",
-              kind: "IMAGE",
-              sizeInBytes: processed.length,
-              url: `/api/media/${filename}`,
-            },
-          }),
-          2000,
-        );
-        registerAssetInMemory(created as MediaAssetRecord);
-        return created as MediaAssetRecord;
-      } catch (dbErr) {
-        reportDbError(dbErr);
-        console.warn("[media] DB insert timed out or failed, using memory record:", dbErr instanceof Error ? dbErr.message : dbErr);
-      }
+      withDbTimeout(
+        prisma.mediaAsset.create({
+          data: {
+            filename,
+            originalName: file.originalname,
+            mimeType: "image/webp",
+            kind: "IMAGE",
+            sizeInBytes: processed.length,
+            url: `/api/media/${filename}`,
+          },
+        }),
+        2000,
+      )
+        .then((created) => {
+          registerAssetInMemory(created as MediaAssetRecord);
+          inMemoryAssetStore.set(created.id, created as MediaAssetRecord);
+        })
+        .catch((dbErr) => {
+          reportDbError(dbErr);
+          console.warn("[media] Background DB insert for image skipped:", dbErr instanceof Error ? dbErr.message : dbErr);
+        });
     }
     return assetRecord;
   }
@@ -131,7 +136,7 @@ export async function saveUploadFile(file: UploadedFile): Promise<MediaAssetReco
     await fs.writeFile(path.join(VIDEO_DIR, filename), buf);
 
     const assetRecord: MediaAssetRecord = {
-      id: `media-${Date.now()}-${hashPart}`,
+      id: filename,
       filename,
       originalName: file.originalname,
       mimeType: file.mimetype,
@@ -141,28 +146,33 @@ export async function saveUploadFile(file: UploadedFile): Promise<MediaAssetReco
       createdAt: new Date(),
     };
     registerAssetInMemory(assetRecord);
+    inMemoryAssetStore.set(filename, assetRecord);
+    inMemoryAssetStore.set(`media-${filename}`, assetRecord);
+    inMemoryAssetStore.set(`media-${Date.now()}-${hashPart}`, assetRecord);
+    inMemoryAssetStore.set(`${Date.now()}-${hashPart}`, assetRecord);
 
     if (!isDbOnCooldown()) {
-      try {
-        const created = await withDbTimeout(
-          prisma.mediaAsset.create({
-            data: {
-              filename,
-              originalName: file.originalname,
-              mimeType: file.mimetype,
-              kind: "VIDEO",
-              sizeInBytes: buf.length,
-              url: `/api/media/${filename}`,
-            },
-          }),
-          2000,
-        );
-        registerAssetInMemory(created as MediaAssetRecord);
-        return created as MediaAssetRecord;
-      } catch (dbErr) {
-        reportDbError(dbErr);
-        console.warn("[media] DB insert timed out or failed, using memory record:", dbErr instanceof Error ? dbErr.message : dbErr);
-      }
+      withDbTimeout(
+        prisma.mediaAsset.create({
+          data: {
+            filename,
+            originalName: file.originalname,
+            mimeType: file.mimetype,
+            kind: "VIDEO",
+            sizeInBytes: buf.length,
+            url: `/api/media/${filename}`,
+          },
+        }),
+        2000,
+      )
+        .then((created) => {
+          registerAssetInMemory(created as MediaAssetRecord);
+          inMemoryAssetStore.set(created.id, created as MediaAssetRecord);
+        })
+        .catch((dbErr) => {
+          reportDbError(dbErr);
+          console.warn("[media] Background DB insert for video skipped:", dbErr instanceof Error ? dbErr.message : dbErr);
+        });
     }
     return assetRecord;
   }
@@ -248,15 +258,50 @@ export async function setEntityMedia(entityType: EntityType, entityId: string, m
         prisma.$transaction(async (tx) => {
           await tx.mediaLink.deleteMany({ where: { entityType, entityId } });
           if (unique.length) {
-            // Only link media that exist in DB to prevent foreign key errors
+            // Find existing DB assets by either id or filename
             const existingAssets = await tx.mediaAsset.findMany({
-              where: { id: { in: unique } },
-              select: { id: true },
+              where: {
+                OR: [
+                  { id: { in: unique } },
+                  { filename: { in: unique } },
+                ],
+              },
+              select: { id: true, filename: true },
             });
+            const assetByFilename = new Map(existingAssets.map((a) => [a.filename, a.id]));
             const validIds = new Set(existingAssets.map((a) => a.id));
-            const toInsert = unique
-              .filter((mId) => validIds.has(mId))
-              .map((mediaId, i) => ({ entityType, entityId, mediaId, sortOrder: i }));
+
+            const toInsert: Array<{ entityType: string; entityId: string; mediaId: string; sortOrder: number }> = [];
+            for (let i = 0; i < unique.length; i++) {
+              const mId = unique[i];
+              let resolvedId = validIds.has(mId) ? mId : assetByFilename.get(mId);
+              if (!resolvedId) {
+                const clean = mId.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
+                const mem = inMemoryAssetStore.get(mId) || inMemoryAssetStore.get(clean);
+                if (mem) {
+                  try {
+                    const created = await tx.mediaAsset.create({
+                      data: {
+                        filename: mem.filename || clean,
+                        originalName: mem.originalName || clean,
+                        mimeType: mem.mimeType || "image/webp",
+                        kind: mem.kind || "IMAGE",
+                        sizeInBytes: mem.sizeInBytes || 2048,
+                        url: mem.url || `/api/media/${clean}`,
+                      },
+                    });
+                    resolvedId = created.id;
+                    validIds.add(created.id);
+                    assetByFilename.set(created.filename, created.id);
+                  } catch {
+                    // ignore collision
+                  }
+                }
+              }
+              if (resolvedId) {
+                toInsert.push({ entityType, entityId, mediaId: resolvedId, sortOrder: i });
+              }
+            }
             if (toInsert.length) {
               await tx.mediaLink.createMany({ data: toInsert });
             }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ExternalLink, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { MediaField, Thumb } from "@/components/portal/MediaPicker";
@@ -34,16 +34,29 @@ function defaults(fields: FieldDef[], item?: Item): Record<string, unknown> {
   return v;
 }
 
-export function CollectionManager({ collection, items }: { collection: CollectionKey; items: Item[] }) {
+export function CollectionManager({
+  collection,
+  items: initialItems,
+  onReload,
+}: {
+  collection: CollectionKey;
+  items: Item[];
+  onReload?: () => void;
+}) {
   const def = COLLECTIONS[collection];
   const navigate = useNavigate();
   const toast = useToast();
   const [q, setQ] = useState("");
+  const [items, setItems] = useState<Item[]>(initialItems);
   const [editing, setEditing] = useState<Item | "new" | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [media, setMedia] = useState<MediaRef[]>([]);
   const [busy, setBusy] = useState(false);
   const [mediaErr, setMediaErr] = useState(false);
+
+  useEffect(() => {
+    setItems(initialItems);
+  }, [initialItems]);
 
   const shown = useMemo(
     () => items.filter((i) => !q || JSON.stringify([i[def.titleField], i[def.subtitleField ?? ""]]).toLowerCase().includes(q.toLowerCase())),
@@ -62,13 +75,21 @@ export function CollectionManager({ collection, items }: { collection: Collectio
     const payload = { ...values, mediaIds: media.map((m) => m.id) };
     const r =
       editing === "new"
-        ? await api(`/api/portal/cms/${collection}`, "POST", payload)
-        : await api(`/api/portal/cms/${collection}/${(editing as Item).id}`, "PUT", payload);
+        ? await api<{ ok: boolean; item?: Item }>(`/api/portal/cms/${collection}`, "POST", payload)
+        : await api<{ ok: boolean; item?: Item }>(`/api/portal/cms/${collection}/${(editing as Item).id}`, "PUT", payload);
     setBusy(false);
     if (!r.ok) return toast(r.error || "Save failed", "err");
     toast(`${def.singular} saved`);
+    const saved = r.data?.item;
+    if (saved) {
+      if (editing === "new") {
+        setItems((prev) => [saved, ...prev.filter((x) => x.id !== saved.id)]);
+      } else {
+        setItems((prev) => prev.map((it) => (it.id === saved.id ? saved : it)));
+      }
+    }
     setEditing(null);
-    window.location.reload();
+    onReload?.();
   }
 
   async function remove(item: Item) {
@@ -76,7 +97,8 @@ export function CollectionManager({ collection, items }: { collection: Collectio
     const r = await api(`/api/portal/cms/${collection}/${item.id}`, "DELETE");
     if (!r.ok) return toast(r.error || "Delete failed", "err");
     toast(`${def.singular} deleted`);
-    window.location.reload();
+    setItems((prev) => prev.filter((it) => it.id !== item.id));
+    onReload?.();
   }
 
   const set = (name: string, v: unknown) => setValues((s) => ({ ...s, [name]: v }));

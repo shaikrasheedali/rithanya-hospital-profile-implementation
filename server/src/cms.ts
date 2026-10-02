@@ -6,6 +6,7 @@ import {
   withMedia,
   registerAssetInMemory,
   inMemoryEntityMediaMap,
+  inMemoryAssetStore,
   type EntityType,
 } from "./media.js";
 import { sanitizeHtml, slugify } from "./utils.js";
@@ -208,7 +209,12 @@ function cleanMediaIds(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v
     .filter((x): x is string => typeof x === "string")
-    .map((id) => id.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, ""));
+    .map((rawId) => {
+      const stripped = rawId.replace(/^disk-\d+-/, "").replace(/^disk-/, "");
+      const mem = inMemoryAssetStore.get(rawId) || inMemoryAssetStore.get(stripped);
+      if (mem && mem.filename) return mem.filename;
+      return stripped;
+    });
 }
 
 async function insertRow(key: CollectionKey, data: Record<string, unknown>) {

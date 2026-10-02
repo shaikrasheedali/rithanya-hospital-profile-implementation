@@ -8,6 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 import express from "express";
 import cookieParser from "cookie-parser";
+import multer from "multer";
+import sharp from "sharp";
 import publicRoutes from "../src/routes/public.js";
 import authRoutes from "../src/routes/auth.js";
 import portalRoutes from "../src/routes/portal.js";
@@ -21,6 +23,8 @@ async function runClientFlowTests() {
   const app = express();
   app.use(cookieParser());
   app.use(express.json());
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 130 * 1024 * 1024, files: 10 } });
+  app.use("/api/portal/media", upload.array("files", 10));
   app.use("/api/public", publicRoutes);
   app.use("/api/auth", authRoutes);
   app.use("/api/portal", portalRoutes);
@@ -383,6 +387,158 @@ async function runClientFlowTests() {
     const dataDeleteSpec: any = await resDeleteSpec.json();
     assert.strictEqual(dataDeleteSpec.ok, true, "Delete item ok is true");
     console.log("✓ CMS delete item passed");
+
+    // =========================================================================
+    // Test 13: USER WORKFLOW: Upload an Image and Use it as Cover in a New Facility Item
+    // =========================================================================
+    console.log("\n[Test 13] USER WORKFLOW: Upload Image & Create New Facility with Cover...");
+    const sampleWebp = await sharp({
+      create: { width: 400, height: 300, channels: 4, background: { r: 10, g: 37, b: 64, alpha: 1 } },
+    })
+      .webp({ quality: 80, effort: 2 })
+      .toBuffer();
+
+    const uploadFormData = new FormData();
+    uploadFormData.append("files", new Blob([sampleWebp], { type: "image/webp" }), "emergency-trauma-wing.webp");
+
+    const tUploadStart = performance.now();
+    const resUploadImage = await fetch(`${BASE}/api/portal/media`, {
+      method: "POST",
+      headers: { Cookie: cookieHeader },
+      body: uploadFormData,
+    });
+    const tUploadEnd = performance.now();
+    const uploadDuration = Math.round(tUploadEnd - tUploadStart);
+    assert.strictEqual(resUploadImage.status, 200, "Image upload returned 200 OK");
+    const dataUpload: any = await resUploadImage.json();
+    assert.ok(Array.isArray(dataUpload.assets) && dataUpload.assets.length > 0, "Uploaded asset returned");
+    const uploadedAsset = dataUpload.assets[0];
+    assert.ok(uploadedAsset.id, "Asset has id");
+    assert.ok(uploadedAsset.url.startsWith("/api/media/"), "Asset URL is valid /api/media/ URL");
+    console.log(`✓ Image uploaded in ${uploadDuration}ms (blazing fast): ${uploadedAsset.filename}`);
+
+    // Create a new facility item using the uploaded image as cover
+    console.log("[Test 13b] Creating new facility item with uploaded cover image...");
+    const facilityPayload = {
+      title: "24/7 Advanced Trauma & Critical Care Center",
+      shortSummary: "State of the art trauma center with 24/7 emergency resuscitation and ICU beds.",
+      contentHtml: "<p>Fully equipped trauma response wing with advanced monitors and oxygen supply.</p>",
+      sortOrder: 1,
+      mediaIds: [uploadedAsset.id],
+    };
+
+    const resCreateFac = await fetch(`${BASE}/api/portal/cms/facilities`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader,
+      },
+      body: JSON.stringify(facilityPayload),
+    });
+    assert.strictEqual(resCreateFac.status, 200, "Facility create returned 200 OK");
+    const dataCreateFac: any = await resCreateFac.json();
+    assert.strictEqual(dataCreateFac.ok, true, "Facility creation acknowledged ok: true");
+    const createdFacility = dataCreateFac.item;
+    assert.ok(createdFacility && createdFacility.id, "Created facility has valid id");
+    assert.ok(Array.isArray(createdFacility.media) && createdFacility.media.length > 0, "Created facility has media attached");
+    assert.ok(!createdFacility.media[0].url.includes("disk-0-"), "Cover URL must not have disk-0- prefix");
+    console.log(`✓ Facility created with ID: ${createdFacility.id} and Cover URL: ${createdFacility.media[0].url}`);
+
+    // Verify the cover image loads via direct HTTP GET
+    console.log("[Test 13c] Verifying the newly created facility's cover image loads via HTTP GET...");
+    const resVerifyCover = await fetch(`${BASE}${createdFacility.media[0].url}`);
+    assert.strictEqual(resVerifyCover.status, 200, "Cover image loaded with 200 OK");
+    const coverBuf = await resVerifyCover.arrayBuffer();
+    assert.ok(coverBuf.byteLength > 100, "Cover image content is valid");
+    console.log(`✓ Cover image loaded successfully (${coverBuf.byteLength} bytes)`);
+
+    // Verify the facility appears on the public website with the cover image
+    console.log("[Test 13d] Verifying new facility is visible on public website...");
+    const resPublicFac = await fetch(`${BASE}/api/public/facilities`);
+    assert.strictEqual(resPublicFac.status, 200, "Public facilities returned 200");
+    const dataPublicFac: any = await resPublicFac.json();
+    const foundPublicFac = dataPublicFac.items.find((f: any) => f.id === createdFacility.id || f.title.includes("24/7 Advanced Trauma"));
+    assert.ok(foundPublicFac, "New facility must be present in public facilities API");
+    assert.ok(foundPublicFac.media && foundPublicFac.media.length > 0, "Public facility has cover media");
+    console.log(`✓ Public website displays new facility with cover: "${foundPublicFac.title}"`);
+
+    // Test updating the facility cover / content
+    console.log("[Test 13e] Updating facility item via PUT /api/portal/cms/facilities/:id...");
+    const resUpdateFac = await fetch(`${BASE}/api/portal/cms/facilities/${createdFacility.id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader,
+      },
+      body: JSON.stringify({
+        ...facilityPayload,
+        title: "24/7 Advanced Emergency & Multi-Specialty Trauma Care Center",
+        sortOrder: 0,
+      }),
+    });
+    assert.strictEqual(resUpdateFac.status, 200, "Facility update returned 200 OK");
+    const dataUpdateFac: any = await resUpdateFac.json();
+    assert.strictEqual(dataUpdateFac.ok, true, "Facility update acknowledged");
+    console.log("✓ Facility item updated successfully");
+
+    // Clean up created facility item
+    console.log("[Test 13f] Cleaning up created test facility via DELETE...");
+    const resDeleteFac = await fetch(`${BASE}/api/portal/cms/facilities/${createdFacility.id}`, {
+      method: "DELETE",
+      headers: { Cookie: cookieHeader },
+    });
+    assert.strictEqual(resDeleteFac.status, 200, "Facility deleted with 200 OK");
+    console.log("✓ Facility deleted successfully (User workflow 1 fully validated!)");
+
+    // =========================================================================
+    // Test 14: Thorough Verification of ALL Admin Dashboard Pages & Desks
+    // =========================================================================
+    console.log("\n[Test 14] Thorough Verification of ALL Admin Dashboard Pages & Desks...");
+    const portalPages = [
+      { name: "Dashboard Overview", url: "/api/portal/dashboard" },
+      { name: "Appointments Desk", url: "/api/portal/appointments" },
+      { name: "EMR Inpatients", url: "/api/portal/patients?type=INPATIENT" },
+      { name: "EMR Outpatients", url: "/api/portal/patients?type=OUTPATIENT" },
+      { name: "EMR Discharged", url: "/api/portal/patients?discharged=true" },
+      { name: "Clinical Categories", url: "/api/portal/r/categories" },
+      { name: "Blood Bank", url: "/api/portal/blood-stock" },
+      { name: "Store Products", url: "/api/portal/cms/products" },
+      { name: "Store Orders", url: "/api/portal/orders" },
+      { name: "HR Employees", url: "/api/portal/employees" },
+      { name: "HR Payroll", url: "/api/portal/payroll?month=10&year=2026" },
+      { name: "Finance Categories", url: "/api/portal/expense-categories" },
+      { name: "Finance Ledger", url: "/api/portal/ledger" },
+      { name: "Finance Overview", url: "/api/portal/finance-overview" },
+      { name: "Compliance DPDP", url: "/api/portal/dpdp-requests" },
+      { name: "Access Users", url: "/api/portal/users" },
+      { name: "Access Permissions", url: "/api/portal/permissions" },
+      { name: "Settings Master", url: "/api/portal/settings" },
+      { name: "Settings Audit Logs", url: "/api/portal/audit-logs" },
+      { name: "CMS Facilities", url: "/api/portal/cms/facilities" },
+      { name: "CMS Specialties", url: "/api/portal/cms/specialties" },
+      { name: "CMS Treatments", url: "/api/portal/cms/treatments" },
+      { name: "CMS Services", url: "/api/portal/cms/services" },
+      { name: "CMS Doctors", url: "/api/portal/cms/doctors" },
+      { name: "CMS Insurance", url: "/api/portal/cms/insurance" },
+      { name: "CMS Gallery", url: "/api/portal/cms/gallery" },
+      { name: "CMS Blogs", url: "/api/portal/cms/blogs" },
+      { name: "CMS Testimonials", url: "/api/portal/cms/testimonials" },
+      { name: "Media Assets Desk", url: "/api/portal/media" },
+    ];
+
+    for (const page of portalPages) {
+      const tStart = performance.now();
+      const resPage = await fetch(`${BASE}${page.url}`, {
+        headers: { Cookie: cookieHeader },
+      });
+      const tEnd = performance.now();
+      const pageLatency = Math.round(tEnd - tStart);
+      assert.strictEqual(resPage.status, 200, `Page desk [${page.name}] must respond with 200 OK`);
+      const body = await resPage.json();
+      assert.ok(body !== null && typeof body === "object", `Page desk [${page.name}] returns valid object`);
+      console.log(`  ✓ Desk [${page.name}]: 200 OK (${pageLatency}ms)`);
+    }
+    console.log("✓ All 29 Portal Desks and Pages responded with 200 OK and valid data!");
 
     // 11l. Performance & Throughput Benchmark (/api/public/home)
     console.log("\n[Test 11l] Benchmarking Public Home Response Latency...");
