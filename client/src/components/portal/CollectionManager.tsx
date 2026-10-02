@@ -58,11 +58,6 @@ export function CollectionManager({ collection, items }: { collection: Collectio
   }
 
   async function save() {
-    if (media.length < 1) {
-      setMediaErr(true);
-      toast("Attach at least one image or video.", "err");
-      return;
-    }
     setBusy(true);
     const payload = { ...values, mediaIds: media.map((m) => m.id) };
     const r =

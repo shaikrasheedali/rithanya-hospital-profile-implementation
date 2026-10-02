@@ -33,7 +33,8 @@ export function LoginForm() {
         <div className="bg-grid absolute inset-0 opacity-40" aria-hidden />
         <div className="absolute -right-20 top-1/4 h-96 w-96 animate-float rounded-full bg-royal/50 blur-3xl" aria-hidden />
         <Link to="/" className="relative flex items-center gap-3 font-heading text-2xl font-semibold text-white">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-navy"><HeartPulse className="h-6 w-6" /></span> Rithanya Hospital
+          <img src="/logo.png" alt="Rithanya Hospital logo" className="h-11 w-11 flex-none object-contain drop-shadow" />
+          Rithanya Hospital
         </Link>
         <div className="relative">
           <p className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-gold">Hospital management system</p>
@@ -49,9 +50,18 @@ export function LoginForm() {
 
       <div className="flex items-center justify-center bg-canvas p-6 sm:p-12">
         <div className="w-full max-w-md">
-          <Link to="/" className="mb-8 inline-block text-base font-semibold text-royal hover:text-alert lg:hidden">← Back to website</Link>
-          <h2 className="text-3xl font-semibold">Staff sign in</h2>
-          <p className="mt-2 text-base text-ink/75">Enter your credentials to access the portal.</p>
+          <Link to="/" className="mb-6 inline-flex items-center gap-2 text-base font-semibold text-royal hover:text-alert lg:hidden">
+            <img src="/logo.png" alt="Rithanya Hospital" className="h-7 w-7 object-contain" />
+            <span>← Back to website</span>
+          </Link>
+          <div className="mb-6 flex items-center gap-3.5">
+            <img src="/logo.png" alt="Rithanya Hospital logo" className="h-12 w-12 flex-none object-contain drop-shadow-sm" />
+            <div>
+              <h2 className="font-heading text-2xl font-bold tracking-tight text-[#0A2540]">Staff sign in</h2>
+              <p className="text-xs font-semibold uppercase tracking-wider text-royal">HMS Staff Portal</p>
+            </div>
+          </div>
+          <p className="mt-1 text-base text-ink/75">Enter your credentials to access the portal.</p>
           <form onSubmit={submit} className="mt-8 space-y-5">
             <label className="block">
               <span className="mb-1 block text-sm font-semibold text-navy">Username or email</span>

@@ -47,7 +47,7 @@ export function ClinicalTypeBrief({ items }: { items: Raw[] }) {
     <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
       {items.map((x, i) => (
         <Reveal key={x.id} delay={(i % 3) * 70}>
-          <Link to="." className="block overflow-hidden rounded-xl border border-line bg-white">
+          <Link to={`/clinical-care/specialties/${x.slug}`} className="block overflow-hidden rounded-xl border border-line bg-white transition-all hover:-translate-y-1 hover:shadow-xl">
             <div className="aspect-[16/10]"><Cover media={x.media} alt={x.title} className="h-full w-full object-cover" /></div>
             <div className="p-6"><h3 className="text-xl font-semibold">{x.title}</h3><p className="mt-2 text-ink/80">{x.shortSummary}</p></div>
           </Link>

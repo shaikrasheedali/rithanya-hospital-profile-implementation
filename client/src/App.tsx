@@ -15,6 +15,7 @@ import InsurancePage from "@/pages/site/Insurance";
 import ContactPage from "@/pages/site/Contact";
 import PrivacyPage from "@/pages/site/Privacy";
 import DpdpPage from "@/pages/site/Dpdp";
+import BloodBankPublicPage from "@/pages/site/BloodBank";
 import PortalLayout from "@/pages/portal/PortalLayout";
 import PortalLoginPage from "@/pages/portal/Login";
 import DashboardPage from "@/pages/portal/Dashboard";
@@ -59,16 +60,28 @@ export default function App() {
         <Route element={<SiteLayout />}>
           <Route index element={<HomePage />} />
           <Route path="about" element={<AboutPage />} />
+          <Route path="facilities" element={<Navigate to="/about" replace />} />
           <Route path="clinical-care" element={<ClinicalCarePage />} />
           <Route path="clinical-care/:type" element={<ClinicalTypePage />} />
           <Route path="clinical-care/:type/:slug" element={<ClinicalDetailPage />} />
+          <Route path="specialties" element={<Navigate to="/clinical-care/specialties" replace />} />
+          <Route path="specialties/:slug" element={<Navigate to="/clinical-care/specialties/:slug" replace />} />
+          <Route path="treatments" element={<Navigate to="/clinical-care/treatments" replace />} />
+          <Route path="treatments/:slug" element={<Navigate to="/clinical-care/treatments/:slug" replace />} />
+          <Route path="services" element={<Navigate to="/clinical-care/services" replace />} />
+          <Route path="services/:slug" element={<Navigate to="/clinical-care/services/:slug" replace />} />
           <Route path="doctors" element={<DoctorsPage />} />
           <Route path="doctors/:slug" element={<DoctorDetailPage />} />
           <Route path="products" element={<ProductsPage />} />
+          <Route path="pharmacy" element={<Navigate to="/products" replace />} />
+          <Route path="blood-bank" element={<BloodBankPublicPage />} />
           <Route path="gallery" element={<GalleryPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="insights/:slug" element={<InsightDetailPage />} />
+          <Route path="blogs" element={<Navigate to="/insights" replace />} />
+          <Route path="blogs/:slug" element={<Navigate to="/insights/:slug" replace />} />
           <Route path="insurance-providers" element={<InsurancePage />} />
+          <Route path="insurance" element={<Navigate to="/insurance-providers" replace />} />
           <Route path="contact" element={<ContactPage />} />
           <Route path="privacy-policy" element={<PrivacyPage />} />
           <Route path="dpdp-erasure-request" element={<DpdpPage />} />

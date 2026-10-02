@@ -7,7 +7,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import multer from "multer";
 import { prisma } from "./db.js";
-import { ensureBaseData } from "./seed.js";
+import { ensureBaseData, ensureSeed } from "./seed.js";
 import { runRetentionPurge } from "./retention.js";
 import authRoutes from "./routes/auth.js";
 import publicRoutes from "./routes/public.js";
@@ -155,8 +155,8 @@ async function boot() {
   });
 
   try {
-    await ensureBaseData();
-    console.log("[server] Database base data verified.");
+    await ensureSeed();
+    console.log("[server] Database base data and demo collections verified.");
   } catch (e) {
     console.warn("[server] Notice: Could not connect to database on boot:", e instanceof Error ? e.message : e);
   }

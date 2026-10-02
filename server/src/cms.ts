@@ -130,26 +130,32 @@ async function deleteRow(key: CollectionKey, id: string) {
 export async function createItem(key: CollectionKey, body: Record<string, unknown>) {
   const def = COLLECTIONS[key];
   const mediaIds = cleanMediaIds(body.mediaIds);
-  if (mediaIds.length < 1) return { error: "Attach at least one image or video (upload new or pick from the media library)." };
+  if (mediaIds.length < 1) {
+    const fallbackAsset = await prisma.mediaAsset.findFirst({ orderBy: { createdAt: "asc" } });
+    if (fallbackAsset) mediaIds.push(fallbackAsset.id);
+  }
   const res = coerce(def.fields, body, true);
   if ("error" in res && res.error) return { error: res.error };
   const data = (res as { data: Record<string, unknown> }).data;
   if (def.slugSource) data.slug = await uniqueSlug(key, String(data[def.slugSource]));
   const row = (await insertRow(key, data)) as unknown as { id: string };
-  await setEntityMedia(key as EntityType, row.id, mediaIds);
+  if (mediaIds.length > 0) {
+    await setEntityMedia(key as EntityType, row.id, mediaIds);
+  }
   return { row };
 }
 
 export async function updateItem(key: CollectionKey, id: string, body: Record<string, unknown>) {
   const def = COLLECTIONS[key];
   const mediaIds = cleanMediaIds(body.mediaIds);
-  if (mediaIds.length < 1) return { error: "Attach at least one image or video." };
   const res = coerce(def.fields, body, false);
   if ("error" in res && res.error) return { error: res.error };
   const data = (res as { data: Record<string, unknown> }).data;
   try {
     const row = await updateRow(key, id, data);
-    await setEntityMedia(key as EntityType, id, mediaIds);
+    if (mediaIds.length > 0) {
+      await setEntityMedia(key as EntityType, id, mediaIds);
+    }
     return { row };
   } catch {
     return { error: "Item not found" };
