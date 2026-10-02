@@ -95,15 +95,19 @@ export async function saveUploadFile(file: UploadedFile) {
 export async function mediaMapFor(entityType: EntityType, ids: string[]): Promise<Map<string, MediaRef[]>> {
   const map = new Map<string, MediaRef[]>();
   if (!ids.length) return map;
-  const rows = await prisma.mediaLink.findMany({
-    where: { entityType, entityId: { in: ids } },
-    include: { media: true },
-    orderBy: { sortOrder: "asc" },
-  });
-  for (const r of rows) {
-    const list = map.get(r.entityId) ?? [];
-    list.push({ id: r.media.id, url: r.media.url, kind: r.media.kind as "IMAGE" | "VIDEO", originalName: r.media.originalName });
-    map.set(r.entityId, list);
+  try {
+    const rows = await prisma.mediaLink.findMany({
+      where: { entityType, entityId: { in: ids } },
+      include: { media: true },
+      orderBy: { sortOrder: "asc" },
+    });
+    for (const r of rows) {
+      const list = map.get(r.entityId) ?? [];
+      list.push({ id: r.media.id, url: r.media.url, kind: r.media.kind as "IMAGE" | "VIDEO", originalName: r.media.originalName });
+      map.set(r.entityId, list);
+    }
+  } catch (err) {
+    console.warn(`[media] DB read for ${entityType} media links skipped:`, err instanceof Error ? err.message : err);
   }
   return map;
 }

@@ -17,6 +17,7 @@
     "seed:images": "tsx scripts/regen-seed-images.ts",
     "seed:video": "tsx scripts/fetch-seed-video.ts",
     "test": "tsx tests/smoke.ts",
+    "test:client": "tsx tests/client-flow.ts",
     "test:e2e": "tsx tests/e2e.ts",
     "typecheck": "tsc --noEmit"
   },

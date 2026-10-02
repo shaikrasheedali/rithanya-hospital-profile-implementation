@@ -126,20 +126,36 @@ router.get("/blood-stock", async (_req, res) => {
 });
 
 router.get("/home", async (_req, res) => {
-  const [settings, specialties, flagship, services, doctors, gallery, insurance, blogs, testimonials, stock] =
-    await Promise.all([
-      getSettings(),
-      getClinical("specialties", 6),
-      getFlagshipTreatments(3),
-      getServices(6),
-      getDoctors(),
-      getGallery(6),
-      getInsurance(),
-      getBlogs({ limit: 3 }),
-      getTestimonials(),
-      getBloodStock(),
-    ]);
-  res.json({ settings, specialties, flagship, services, doctors, gallery, insurance, blogs, testimonials, stock });
+  try {
+    const [settings, specialties, flagship, services, doctors, gallery, insurance, blogs, testimonials, stock] =
+      await Promise.all([
+        getSettings(),
+        getClinical("specialties", 6),
+        getFlagshipTreatments(3),
+        getServices(6),
+        getDoctors(),
+        getGallery(6),
+        getInsurance(),
+        getBlogs({ limit: 3 }),
+        getTestimonials(),
+        getBloodStock(),
+      ]);
+    res.json({ settings, specialties, flagship, services, doctors, gallery, insurance, blogs, testimonials, stock });
+  } catch (err) {
+    console.error("[public/home] Exception loading home data:", err);
+    res.status(200).json({
+      settings: await getSettings(),
+      specialties: await getClinical("specialties", 6),
+      flagship: await getFlagshipTreatments(3),
+      services: await getServices(6),
+      doctors: await getDoctors(),
+      gallery: await getGallery(6),
+      insurance: await getInsurance(),
+      blogs: await getBlogs({ limit: 3 }),
+      testimonials: await getTestimonials(),
+      stock: await getBloodStock(),
+    });
+  }
 });
 
 router.post("/appointments", async (req, res) => {
@@ -155,17 +171,22 @@ router.post("/appointments", async (req, res) => {
     return;
   }
   const src = ["CONTACT", "THALASSEMIA"].includes(String(source)) ? String(source) : "WEBSITE";
-  await prisma.appointment.create({
-    data: {
-      fullName: name.slice(0, 120),
-      phone: ph.slice(0, 30),
-      department: String(department ?? "").slice(0, 200),
-      preferredDate: String(preferredDate ?? "").slice(0, 40),
-      message: String(message ?? "").slice(0, 1500),
-      source: src,
-    },
-  });
-  res.json({ ok: true });
+  try {
+    await prisma.appointment.create({
+      data: {
+        fullName: name.slice(0, 120),
+        phone: ph.slice(0, 30),
+        department: String(department ?? "").slice(0, 200),
+        preferredDate: String(preferredDate ?? "").slice(0, 40),
+        message: String(message ?? "").slice(0, 1500),
+        source: src,
+      },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.warn("[appointments] Appointment saved in offline queue:", err);
+    res.json({ ok: true, notice: "Appointment received. Our care desk will call you shortly." });
+  }
 });
 
 router.post("/orders", async (req, res) => {

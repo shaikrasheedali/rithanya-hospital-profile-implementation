@@ -5,7 +5,8 @@ const { execSync } = require("child_process");
 
 // Automatically assemble DATABASE_URL from GoDaddy environment variables if not already provided
 if (!process.env.DATABASE_URL && process.env.DB_HOST) {
-  const host = process.env.DB_HOST || "localhost";
+  const rawHost = process.env.DB_HOST || "127.0.0.1";
+  const host = rawHost === "localhost" ? "127.0.0.1" : rawHost;
   const port = process.env.DB_PORT || "3306";
   const user = encodeURIComponent(process.env.DB_USER || "root");
   const password = encodeURIComponent(process.env.DB_PASSWORD || "");

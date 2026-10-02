@@ -1,4 +1,22 @@
 import mysql from "mysql2/promise";
+import fs from "node:fs";
+
+function resolveSocketPath(): string | undefined {
+  if (process.env.DB_SOCKET) return process.env.DB_SOCKET;
+  const commonSockets = [
+    "/var/lib/mysql/mysql.sock",
+    "/tmp/mysql.sock",
+    "/var/run/mysqld/mysqld.sock",
+  ];
+  for (const s of commonSockets) {
+    try {
+      if (fs.existsSync(s)) return s;
+    } catch {
+      // ignore
+    }
+  }
+  return undefined;
+}
 
 /**
  * Creates and returns a connection to the hosted MySQL database.
@@ -6,13 +24,21 @@ import mysql from "mysql2/promise";
  * DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
  */
 export async function createDbConnection(): Promise<mysql.Connection> {
-  const connection = await mysql.createConnection({
-    host: process.env.DB_HOST,
+  const rawHost = process.env.DB_HOST || "127.0.0.1";
+  const host = rawHost === "localhost" ? "127.0.0.1" : rawHost;
+  const socketPath = resolveSocketPath();
+  const opts: mysql.ConnectionOptions = {
+    host,
     port: Number(process.env.DB_PORT || "3306"),
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-  });
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "rithanya",
+    connectTimeout: 5000,
+  };
+  if (socketPath && (host === "127.0.0.1" || host === "localhost")) {
+    opts.socketPath = socketPath;
+  }
+  const connection = await mysql.createConnection(opts);
   return connection;
 }
 

@@ -21,6 +21,7 @@
     "db:seed": "npm --prefix server run db:seed",
     "db:setup": "npm --prefix server run db:setup",
     "test": "npm --prefix server run test",
+    "test:client": "npm --prefix server run test:client",
     "test:e2e": "npm --prefix server run test:e2e",
     "typecheck": "npm --prefix client run typecheck && npm --prefix server run typecheck",
     "lint": "npm --prefix client run lint || true"

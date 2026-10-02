@@ -10,19 +10,6 @@ type NavItem = { label: string; href: string; children?: { label: string; href: 
 
 const NAV: NavItem[] = [
   {
-    label: "Departments",
-    href: "/clinical-care",
-    children: [
-      { label: "Specialties", href: "/clinical-care/specialties" },
-      { label: "Treatments", href: "/clinical-care/treatments" },
-      { label: "Services", href: "/clinical-care/services" },
-    ],
-  },
-  { label: "Doctors", href: "/doctors" },
-  { label: "Facilities", href: "/about#facilities" },
-  { label: "Pharmacy", href: "/products" },
-  { label: "Insights", href: "/insights" },
-  {
     label: "Hospital",
     href: "/about",
     children: [
@@ -32,7 +19,20 @@ const NAV: NavItem[] = [
       { label: "DPDP Erasure Request", href: "/dpdp-erasure-request" },
     ],
   },
-  { label: "Contact", href: "/contact" },
+  { label: "Facilities", href: "/about#facilities" },
+  {
+    label: "Departments",
+    href: "/clinical-care",
+    children: [
+      { label: "Specialties", href: "/clinical-care/specialties" },
+      { label: "Treatments", href: "/clinical-care/treatments" },
+      { label: "Services", href: "/clinical-care/services" },
+    ],
+  },
+  { label: "Doctors", href: "/doctors" },
+  { label: "Pharmacy", href: "/products" },
+  { label: "Insights", href: "/insights" },
+  { label: "Contact us", href: "/contact" },
 ];
 
 export function Navbar({ brand, phone }: { brand: string; phone: string }) {

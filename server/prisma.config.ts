@@ -4,7 +4,8 @@ import { defineConfig } from "prisma/config";
 function getDatabaseUrl(): string {
   const raw = process.env.DATABASE_URL;
   if (raw && !raw.startsWith("file:")) return raw;
-  const host = process.env.DB_HOST || "localhost";
+  const rawHost = process.env.DB_HOST || "127.0.0.1";
+  const host = rawHost === "localhost" ? "127.0.0.1" : rawHost;
   const port = process.env.DB_PORT || "3306";
   const user = encodeURIComponent(process.env.DB_USER || "root");
   const password = encodeURIComponent(process.env.DB_PASSWORD || "");
