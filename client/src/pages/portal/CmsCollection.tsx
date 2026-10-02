@@ -6,10 +6,11 @@ import { usePortalData, LoadingCard, ErrorCard } from "./hooks";
 export default function CmsCollectionPage(){
   const {collection}=useParams();
   const key=(collection as CollectionKey);
-  const {data,loading,error,reload}=usePortalData<{items:any[]}>(key?"/api/portal/cms/"+key:"");
+  const validKey = key && (key in COLLECTIONS) ? key : null;
+  const {data,loading,error,reload}=usePortalData<{items:any[]}>(validKey?"/api/portal/cms/"+validKey:"");
   useEffect(()=>{document.title=(COLLECTIONS[key]?.label??"CMS")+" | Rithanya HMS";},[key]);
-  if(!key||!(key in COLLECTIONS)) return <div className="rounded-xl border border-line bg-white p-8">Unknown collection.</div>;
+  if(!validKey) return <div className="rounded-xl border border-line bg-white p-8">Unknown collection.</div>;
   if(loading) return <LoadingCard/>;
-  if(error||!data) return <ErrorCard error={error??"Load failed"}/>;
-  return <CollectionManager collection={key} items={data.items} onReload={reload}/>;
+  if(error||!data) return <ErrorCard error={error ?? "Load failed"} onRetry={reload} />;
+  return <CollectionManager collection={validKey} items={data.items} onReload={reload}/>;
 }

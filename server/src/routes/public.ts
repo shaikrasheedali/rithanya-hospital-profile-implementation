@@ -30,12 +30,19 @@ const router = Router();
 /** Express 5 types route params as string | string[] — normalize to a single string. */
 const param = (v: unknown): string => (Array.isArray(v) ? String(v[0] ?? "") : String(v ?? ""));
 
+function clampLimit(v: unknown, def?: number, max = 100): number | undefined {
+  if (v === undefined || v === null || v === "") return def;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return def;
+  return Math.min(Math.floor(n), max);
+}
+
 router.get("/settings", async (_req, res) => {
   res.json({ settings: await getSettings() });
 });
 
 router.get("/facilities", async (req, res) => {
-  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const limit = clampLimit(req.query.limit, undefined, 100);
   res.json({ items: await getFacilities(limit) });
 });
 
@@ -54,7 +61,7 @@ router.get("/clinical", async (req, res) => {
     res.status(400).json({ error: "Invalid type" });
     return;
   }
-  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const limit = clampLimit(req.query.limit, undefined, 100);
   res.json({ items: await getClinical(type as never, limit) });
 });
 
@@ -74,7 +81,7 @@ router.get("/clinical/:type/:slug", async (req, res) => {
 });
 
 router.get("/services", async (req, res) => {
-  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const limit = clampLimit(req.query.limit, undefined, 100);
   res.json({ items: await getServices(limit) });
 });
 
@@ -83,7 +90,7 @@ router.get("/treatments", async (_req, res) => {
 });
 
 router.get("/flagship", async (req, res) => {
-  const limit = req.query.limit ? Number(req.query.limit) : 3;
+  const limit = clampLimit(req.query.limit, 3, 20) ?? 3;
   res.json({ items: await getFlagshipTreatments(limit) });
 });
 
@@ -105,7 +112,7 @@ router.get("/insurance", async (_req, res) => {
 });
 
 router.get("/gallery", async (req, res) => {
-  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const limit = clampLimit(req.query.limit, undefined, 100);
   res.json({ items: await getGallery(limit) });
 });
 
@@ -115,11 +122,13 @@ router.get("/testimonials", async (_req, res) => {
 
 router.get("/blogs", async (req, res) => {
   const { category, q, page, pageSize, limit } = req.query as Record<string, string>;
+  const safePage = clampLimit(page, 1, 1000) ?? 1;
+  const safePageSize = clampLimit(pageSize ?? limit, 6, 50) ?? 6;
   const data = await getBlogs({
     category: category || undefined,
     q: q || undefined,
-    page: page ? Number(page) : 1,
-    pageSize: pageSize ? Number(pageSize) : limit ? Number(limit) : 6,
+    page: safePage,
+    pageSize: safePageSize,
   });
   res.json(data);
 });

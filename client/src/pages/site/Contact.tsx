@@ -8,7 +8,15 @@ export default function ContactPage() {
   const [s, setS] = useState<{ emergencyHotline: string; secondaryHotline: string | null; physicalAddress: string; opdTimings: string } | null>(null);
   useEffect(() => {
     document.title = "Contact | Rithanya Hospital";
-    fetch("/api/public/settings").then((r) => r.json()).then((d) => setS(d.settings)).catch(() => undefined);
+    let alive = true;
+    fetch("/api/public/settings")
+      .then(async (r) => {
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then((d) => { if (alive && d?.settings) setS(d.settings); })
+      .catch(() => { /* fall back to placeholders — no toast for decorative settings */ });
+    return () => { alive = false; };
   }, []);
   return (
     <>

@@ -26,15 +26,28 @@ export function DpdpDesk({ rows }: { rows: DpdpDTO[] }) {
 
   async function run(action: string) {
     if (!sel) return;
+    if ((action === "reject" || action === "resolve") && !notes.trim()) {
+      toast("Add resolution notes before dismissing or resolving.", "err");
+      return;
+    }
+    if (action === "erase" && !matches?.length) {
+      toast("Run the matcher first — no verified records to erase.", "err");
+      return;
+    }
     setBusy(true);
     const r = await api<{ matches?: Match[]; erased?: number }>(`/api/portal/r/dpdp/${sel.id}`, "POST", { action, notes });
     setBusy(false);
-    if (!r.ok) return toast(r.error || "Action failed", "err");
-    if (action === "match") return setMatches(r.data?.matches ?? []);
-    toast(action === "erase" ? `${r.data?.erased} record(s) erased` : "Request updated");
+    if (!r.ok) return toast(r.error || "Action failed — please try again.", "err");
+    if (action === "match") {
+      const m = r.data?.matches ?? [];
+      setMatches(m);
+      toast(m.length ? `${m.length} matching record(s) found` : "No verified match found");
+      return;
+    }
+    toast(action === "erase" ? `${r.data?.erased ?? 0} record(s) erased` : "Request updated");
     setSel(null);
     setMatches(null);
-    window.location.reload();
+    setTimeout(() => window.location.reload(), 1200);
   }
 
   return (

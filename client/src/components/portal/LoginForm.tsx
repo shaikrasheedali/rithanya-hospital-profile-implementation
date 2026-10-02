@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 
 import { useState } from "react";
 import { Eye, EyeOff, HeartPulse, Lock, ShieldCheck, User } from "lucide-react";
+import { toast } from "sonner";
 import { api, inputCls } from "@/components/portal/ui";
 
 export function LoginForm() {
@@ -15,16 +16,24 @@ export function LoginForm() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!username.trim() || !password) {
+      const msg = "Enter your username and password.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
     setBusy(true);
     setError("");
-    const r = await api("/api/auth/login", "POST", { username, password });
+    const r = await api("/api/auth/login", "POST", { username: username.trim(), password });
     if (!r.ok) {
-      setError(r.error || "Sign-in failed");
+      const msg = r.error || "Sign-in failed — please try again.";
+      setError(msg);
+      toast.error(msg);
       setBusy(false);
       return;
     }
+    toast.success("Signed in successfully.");
     window.location.href = "/portal/dashboard";
-    window.location.reload();
   }
 
   return (

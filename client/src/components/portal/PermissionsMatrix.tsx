@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lock, Save } from "lucide-react";
 import { Badge, Btn, Card, PageHeader, api, useToast } from "@/components/portal/ui";
@@ -13,15 +13,18 @@ export function PermissionsMatrix({ users }: { users: U[] }) {
   const toast = useToast();
   const [state, setState] = useState(() => Object.fromEntries(users.map((u) => [u.id, u.modules])));
   const [busy, setBusy] = useState<string | null>(null);
-  const dirty = (u: U) => COLS.some(([k]) => Boolean(state[u.id][k]) !== Boolean(u.modules[k]));
+  useEffect(() => {
+    setState(Object.fromEntries(users.map((u) => [u.id, u.modules])));
+  }, [users]);
+  const dirty = (u: U) => COLS.some(([k]) => Boolean(state[u.id]?.[k]) !== Boolean(u.modules[k]));
 
   async function save(u: U) {
     setBusy(u.id);
     const r = await api(`/api/portal/r/permissions/${u.id}`, "PUT", { modules: state[u.id] });
     setBusy(null);
-    if (!r.ok) return toast(r.error || "Save failed", "err");
+    if (!r.ok) return toast(r.error || "Save failed — please try again.", "err");
     toast(`Permissions saved for ${u.fullName}`);
-    window.location.reload();
+    setTimeout(() => window.location.reload(), 1200);
   }
 
   return (
@@ -39,7 +42,7 @@ export function PermissionsMatrix({ users }: { users: U[] }) {
                 {COLS.map(([k, l]) => (
                   <td key={k} className="px-3 py-3 text-center">
                     {u.role === "SUPERADMIN" ? <Lock className="mx-auto h-4 w-4 text-ink/40" aria-label="Always enabled" /> : (
-                      <input type="checkbox" aria-label={`${l} for ${u.fullName}`} disabled={!u.editable} checked={Boolean(state[u.id][k])} onChange={(e) => setState({ ...state, [u.id]: { ...state[u.id], [k]: e.target.checked } })} className="h-5 w-5 accent-[#0D47A1] disabled:opacity-40" />
+                      <input type="checkbox" aria-label={`${l} for ${u.fullName}`} disabled={!u.editable} checked={Boolean(state[u.id]?.[k])} onChange={(e) => setState({ ...state, [u.id]: { ...state[u.id], [k]: e.target.checked } })} className="h-5 w-5 accent-[#0D47A1] disabled:opacity-40" />
                     )}
                   </td>
                 ))}

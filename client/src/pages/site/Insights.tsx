@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { Reveal } from "@/components/Reveal";
 import { PageHero, Cover, EmptyState } from "@/components/site/ui";
 import { formatDate } from "@/lib/utils";
@@ -12,9 +13,12 @@ export default function InsightsPage() {
   const [sp, setSp] = useSearchParams();
   const q = sp.get("q") ?? "";
   const category = sp.get("category") ?? "All";
-  const page = Number(sp.get("page") ?? 1);
+  const rawPage = Number(sp.get("page") ?? 1);
+  const page = Number.isFinite(rawPage) && rawPage >= 1 ? Math.floor(rawPage) : 1;
   const [posts, setPosts] = useState<Post[]>([]);
   const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const pageSize = 6;
 
   useEffect(() => {
@@ -24,7 +28,23 @@ export default function InsightsPage() {
     if (category !== "All") qs.set("category", category);
     qs.set("page", String(page));
     qs.set("pageSize", String(pageSize));
-    fetch(`/api/public/blogs?${qs}`).then((r) => r.json()).then((d) => { setPosts(d.posts ?? []); setTotal(d.total ?? 0); }).catch(() => undefined);
+    let alive = true;
+    setLoading(true);
+    setError(null);
+    fetch(`/api/public/blogs?${qs}`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error("Could not load articles — please try again.");
+        return r.json();
+      })
+      .then((d) => { if (alive) { setPosts(d.posts ?? []); setTotal(d.total ?? 0); } })
+      .catch((e) => {
+        if (!alive) return;
+        const msg = e instanceof Error ? e.message : "Could not load articles — please try again.";
+        setError(msg);
+        toast.error(msg);
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, [q, category, page]);
 
   const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -42,7 +62,9 @@ export default function InsightsPage() {
             ))}
           </div>
         </div>
-        {posts.length === 0 ? <EmptyState title="No articles found" text="Try a different search or category." /> : (
+        {loading ? <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">{[0,1,2].map((i) => <div key={i} className="h-72 animate-pulse rounded-xl bg-line/60" />)}</div>
+        : error ? <div className="text-center"><p role="alert" className="mx-auto max-w-xl rounded-xl border border-red-200 bg-red-50 p-6 font-medium text-red-900">{error}</p><button onClick={() => window.location.reload()} className="mt-6 rounded-full bg-royal px-6 py-3 font-semibold text-white">Try again</button></div>
+        : posts.length === 0 ? <EmptyState title="No articles found" text="Try a different search or category." /> : (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {posts.map((b, i) => (
               <Reveal key={b.id} delay={(i % 3) * 70}>

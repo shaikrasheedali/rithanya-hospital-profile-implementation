@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { Reveal } from "@/components/Reveal";
 import { ClinicalHub, type HubItem } from "@/components/site/ClinicalHub";
 import { PageHero, Cover } from "@/components/site/ui";
@@ -9,27 +10,48 @@ type Raw = { id: string; slug: string; title: string; shortSummary: string; cate
 
 export default function ClinicalCarePage() {
   const [data, setData] = useState<Record<string, HubItem[]> | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = "Clinical Care | Rithanya Hospital";
+    let alive = true;
     Promise.all([
-      fetch("/api/public/clinical?type=specialties").then((r) => r.json()),
-      fetch("/api/public/clinical?type=treatments").then((r) => r.json()),
-      fetch("/api/public/clinical?type=services").then((r) => r.json()),
+      fetch("/api/public/clinical?type=specialties").then(async (r) => {
+        if (!r.ok) throw new Error("Could not load clinical care — please try again.");
+        return r.json();
+      }),
+      fetch("/api/public/clinical?type=treatments").then(async (r) => {
+        if (!r.ok) throw new Error("Could not load clinical care — please try again.");
+        return r.json();
+      }),
+      fetch("/api/public/clinical?type=services").then(async (r) => {
+        if (!r.ok) throw new Error("Could not load clinical care — please try again.");
+        return r.json();
+      }),
     ])
       .then(([sp, tr, sv]) => {
+        if (!alive) return;
         const map = (rows: Raw[]): HubItem[] =>
           rows.map((x) => ({ id: x.id, slug: x.slug, title: x.title, summary: x.shortSummary, category: x.category, cover: coverOf(x.media) }));
         setData({ specialties: map(sp.items ?? []), treatments: map(tr.items ?? []), services: map(sv.items ?? []) });
+        setError(null);
       })
-      .catch(() => undefined);
+      .catch((e) => {
+        if (!alive) return;
+        const msg = e instanceof Error ? e.message : "Could not load clinical care — please try again.";
+        setError(msg);
+        toast.error(msg);
+      });
+    return () => { alive = false; };
   }, []);
 
   return (
     <>
       <PageHero eyebrow="Clinical care" title="Specialties, treatments & services" desc="Search across every department — from thalassemia daycare to diagnostics and senior wellness." />
       <section className="mx-auto max-w-7xl px-6 py-16 sm:px-8 lg:py-24">
-        {!data ? (
+        {error && !data ? (
+          <div className="text-center"><p role="alert" className="mx-auto max-w-xl rounded-xl border border-red-200 bg-red-50 p-6 font-medium text-red-900">{error}</p><button onClick={() => window.location.reload()} className="mt-6 rounded-full bg-royal px-6 py-3 font-semibold text-white">Try again</button></div>
+        ) : !data ? (
           <div className="animate-pulse space-y-4" aria-busy="true"><div className="h-12 rounded-full bg-line/60" /><div className="grid gap-6 sm:grid-cols-3">{[0,1,2].map((i)=><div key={i} className="h-64 rounded-xl bg-line/60" />)}</div></div>
         ) : (
           <Reveal><ClinicalHub data={data as Record<"specialties"|"treatments"|"services", HubItem[]>} /></Reveal>

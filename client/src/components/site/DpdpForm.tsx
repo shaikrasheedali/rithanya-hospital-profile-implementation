@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CheckCircle2, Search, Upload } from "lucide-react";
+import { toast } from "sonner";
 
 const input = "w-full rounded-lg border border-line bg-white px-3.5 py-3 text-base focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/20";
 
@@ -20,15 +21,36 @@ export function DpdpForm() {
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const fileInput = (e.currentTarget.querySelector('input[type="file"]') as HTMLInputElement | null)?.files?.[0];
+    if (fileInput) {
+      if (fileInput.size > 8 * 1024 * 1024) {
+        const msg = "Identity proof must be under 8MB.";
+        setError(msg);
+        toast.error(msg);
+        return;
+      }
+      const okType = fileInput.type.startsWith("image/") || fileInput.type === "application/pdf";
+      if (!okType) {
+        const msg = "Identity proof must be an image or PDF.";
+        setError(msg);
+        toast.error(msg);
+        return;
+      }
+    }
+    void fd;
     setBusy(true);
     setError("");
     try {
       const res = await fetch("/api/public/dpdp", { method: "POST", body: new FormData(e.currentTarget) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Submission failed");
-      setCode(data.trackingCode);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { error?: string }).error || "Submission failed — please try again.");
+      setCode((data as { trackingCode: string }).trackingCode);
+      toast.success("Erasure request submitted. Save your tracking code.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Submission failed");
+      const msg = err instanceof Error ? err.message : "Submission failed — please try again.";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -85,11 +107,13 @@ export function DpdpStatus() {
     setRes(null);
     try {
       const r = await fetch(`/api/public/dpdp?code=${encodeURIComponent(code)}&phone=${encodeURIComponent(phone)}`);
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Not found");
-      setRes(d);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error || "Request not found — check the code and mobile number.");
+      setRes(d as { status: string; submittedAt: string; updatedAt: string; note: string | null });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Not found");
+      const msg = err instanceof Error ? err.message : "Request not found — check the code and mobile number.";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }

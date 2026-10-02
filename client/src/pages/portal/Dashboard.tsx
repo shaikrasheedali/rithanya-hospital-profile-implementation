@@ -10,11 +10,11 @@ type Dashboard = {
 };
 
 export default function DashboardPage() {
-  const { data, loading, error } = usePortalData<Dashboard>("/api/portal/dashboard");
+  const { data, loading, error, reload } = usePortalData<Dashboard>("/api/portal/dashboard");
   useEffect(() => { document.title = "Dashboard | Rithanya HMS"; }, []);
 
   if (loading) return <LoadingCard />;
-  if (error || !data) return <ErrorCard error={error ?? "Could not load dashboard"} />;
+  if (error || !data) return <ErrorCard error={error ?? "Could not load dashboard"} onRetry={reload} />;
 
   const stats = data.stats ?? { patients: 0, appointments: 0, orders: 0, products: 0, dpdpPending: 0 };
   const appointments = data.recentAppointments ?? [];

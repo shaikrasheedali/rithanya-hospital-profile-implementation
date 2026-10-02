@@ -32,10 +32,15 @@ export default function SiteLayout() {
   const [s, setS] = useState<Settings>(FALLBACK);
 
   useEffect(() => {
+    let alive = true;
     fetch("/api/public/settings")
-      .then((r) => r.json())
-      .then((d) => d.settings && setS(d.settings))
-      .catch(() => undefined);
+      .then(async (r) => {
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then((d) => { if (alive && d?.settings) setS(d.settings); })
+      .catch(() => { /* keep FALLBACK — settings failure must not block the site */ });
+    return () => { alive = false; };
   }, []);
 
   return (

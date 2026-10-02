@@ -5,11 +5,12 @@ import { formatDate, formatINR } from "@/lib/utils";
 import { usePortalData, LoadingCard, ErrorCard } from "./hooks";
 export default function PayslipPage(){
   const {id}=useParams();
-  const {data,loading,error}=usePortalData<{record:any;settings:any}>("/api/portal/payslip/"+id);
+  const {data,loading,error,reload}=usePortalData<{record:any;settings:any}>("/api/portal/payslip/"+id);
   useEffect(()=>{document.title="Payslip | Rithanya HMS";},[]);
   if(loading) return <LoadingCard/>;
-  if(error||!data) return <ErrorCard error={error??"Load failed"}/>;
+  if(error||!data) return <ErrorCard error={error ?? "Load failed"} onRetry={reload} />;
   const r = data.record;
+  if (!r || !r.employee) return <ErrorCard error="Payslip record is incomplete — please try again." onRetry={reload} />;
   const legalName = r.employee?.entity === "RVBC" ? "RVBC (Voluntary Blood Centre)" : data.settings.legalName;
   return (
     <div>

@@ -4,7 +4,7 @@ import { EntityPicker } from "@/components/portal/ui";
 import { usePortalData, LoadingCard, ErrorCard } from "./hooks";
 
 export default function FinanceLedgerPage() {
-  const { data, loading, error } = usePortalData<{
+  const { data, loading, error, reload } = usePortalData<{
     items: any[];
     categories: any[];
     entity: string;
@@ -16,7 +16,7 @@ export default function FinanceLedgerPage() {
   }, []);
 
   if (loading) return <LoadingCard />;
-  if (error || !data) return <ErrorCard error={error ?? "Load failed"} />;
+  if (error || !data) return <ErrorCard error={error ?? "Load failed"} onRetry={reload} />;
 
   const opts = data.categories.map((c: any) => ({ value: c.id, label: c.name }));
 

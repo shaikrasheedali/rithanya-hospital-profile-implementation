@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ArrowRight, CheckCircle2, Minus, Plus, ShieldCheck, ShoppingBag, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
 import { formatINR } from "@/lib/utils";
 
 export type CartItem = { id: string; name: string; price: number; image?: string; stock: number; quantity: number };
@@ -46,11 +47,24 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [items, ready]);
 
   const add = useCallback((p: Omit<CartItem, "quantity">, qty = 1) => {
+    if (p.stock <= 0) {
+      toast.error(`${p.name} is currently out of stock.`);
+      return;
+    }
+    let capped = false;
     setItems((cur) => {
       const hit = cur.find((i) => i.id === p.id);
-      if (hit) return cur.map((i) => (i.id === p.id ? { ...i, stock: p.stock, quantity: Math.min(p.stock, i.quantity + qty) } : i));
-      return [...cur, { ...p, quantity: Math.min(p.stock, qty) }];
+      if (hit) {
+        const next = Math.min(p.stock, hit.quantity + qty);
+        if (next === hit.quantity || next < hit.quantity + qty) capped = true;
+        return cur.map((i) => (i.id === p.id ? { ...i, stock: p.stock, quantity: next } : i));
+      }
+      const nextQty = Math.min(p.stock, qty);
+      if (nextQty < qty) capped = true;
+      return [...cur, { ...p, quantity: nextQty }];
     });
+    if (capped) toast.error(`Only ${p.stock} unit(s) of ${p.name} available.`);
+    else toast.success(`${p.name} added to cart.`);
     setOpen(true);
   }, []);
   const update = useCallback(
@@ -112,6 +126,19 @@ function CartDrawer() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (items.length === 0) {
+      const msg = "Your cart is empty.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
+    const digits = form.phone.replace(/\D/g, "");
+    if (digits.length < 10) {
+      const msg = "Please enter a valid 10-digit mobile number.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -120,13 +147,19 @@ function CartDrawer() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, items: items.map((i) => ({ productId: i.id, quantity: i.quantity })) }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not place order");
-      setDone({ orderNumber: data.orderNumber, total: data.total });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { error?: string }).error || "Could not place order — please try again.");
+      const orderNumber = (data as { orderNumber?: string }).orderNumber;
+      const totalVal = (data as { total?: number }).total;
+      if (!orderNumber) throw new Error("Order was received but no order number was returned. Please call the pharmacy desk.");
+      setDone({ orderNumber, total: typeof totalVal === "number" ? totalVal : subtotal + delivery });
       clear();
       setStep("DONE");
+      toast.success(`Order ${orderNumber} placed successfully.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not place order");
+      const msg = err instanceof Error ? err.message : "Could not place order — please try again.";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }

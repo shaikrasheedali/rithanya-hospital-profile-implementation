@@ -30,7 +30,9 @@ export type CrudField = {
 function toInput(f: CrudField, v: unknown): unknown {
   if (f.type === "date") {
     if (!v) return new Date().toISOString().slice(0, 10);
-    return new Date(v as string).toISOString().slice(0, 10);
+    const t = new Date(v as string);
+    if (Number.isNaN(t.getTime())) return new Date().toISOString().slice(0, 10);
+    return t.toISOString().slice(0, 10);
   }
   if (f.type === "checkbox") return v === undefined ? true : Boolean(v);
   if (f.type === "password") return "";
@@ -74,6 +76,7 @@ export function CrudManager({
   const [editing, setEditing] = useState<Row | "new" | null>(null);
   const [v, setV] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
 
   const shown = useMemo(() => rows.filter((r) => !q || JSON.stringify(Object.values(r)).toLowerCase().includes(q.toLowerCase())), [rows, q]);
 
@@ -90,23 +93,28 @@ export function CrudManager({
     for (const f of fields) if (f.type === "password" && !body[f.name]) delete body[f.name];
     const r = editing === "new" ? await api(`/api/portal/r/${resource}`, "POST", body) : await api(`/api/portal/r/${resource}/${(editing as Row).id}`, "PUT", body);
     setBusy(false);
-    if (!r.ok) return toast(r.error || "Save failed", "err");
+    if (!r.ok) return toast(r.error || "Save failed — please try again.", "err");
     toast(`${singular} saved`);
     setEditing(null);
-    window.location.reload();
+    setTimeout(() => window.location.reload(), 1200);
   }
   async function del(row: Row) {
     if (!confirm(`Delete this ${singular.toLowerCase()}? This cannot be undone.`)) return;
+    setRowBusy(row.id);
     const r = await api(`/api/portal/r/${resource}/${row.id}`, "DELETE");
-    if (!r.ok) return toast(r.error || "Delete failed", "err");
+    setRowBusy(null);
+    if (!r.ok) return toast(r.error || "Delete failed — please try again.", "err");
     toast(`${singular} deleted`);
-    window.location.reload();
+    setTimeout(() => window.location.reload(), 1200);
   }
   async function act(row: Row, action: string) {
+    if (rowBusy) return;
+    setRowBusy(`${row.id}:${action}`);
     const r = await api(`/api/portal/r/${resource}/${row.id}`, "POST", { action });
-    if (!r.ok) return toast(r.error || "Action failed", "err");
+    setRowBusy(null);
+    if (!r.ok) return toast(r.error || "Action failed — please try again.", "err");
     toast("Updated");
-    window.location.reload();
+    setTimeout(() => window.location.reload(), 1200);
   }
 
   function cell(c: CrudCol, r: Row) {
@@ -155,9 +163,9 @@ export function CrudManager({
                     {columns.map((c) => <td key={c.key} className="px-4 py-3 align-top">{cell(c, r)}</td>)}
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        {rowActions.map((a) => <Btn key={a.action} small variant="secondary" onClick={() => act(r, a.action)}><Power className="h-4 w-4" /> {a.label}</Btn>)}
+                        {rowActions.map((a) => <Btn key={a.action} small variant="secondary" disabled={rowBusy === `${r.id}:${a.action}`} onClick={() => act(r, a.action)}><Power className="h-4 w-4" /> {rowBusy === `${r.id}:${a.action}` ? "…" : a.label}</Btn>)}
                         {!lockedIds.includes(r.id) && <Btn small variant="secondary" onClick={() => open(r)} aria-label="Edit"><Pencil className="h-4 w-4" /> Edit</Btn>}
-                        {canDelete && !lockedIds.includes(r.id) && <Btn small variant="ghost" onClick={() => del(r)} aria-label="Delete" className="!text-alert hover:!bg-alert/10"><Trash2 className="h-4 w-4" /></Btn>}
+                        {canDelete && !lockedIds.includes(r.id) && <Btn small variant="ghost" disabled={rowBusy === r.id} onClick={() => del(r)} aria-label="Delete" className="!text-alert hover:!bg-alert/10"><Trash2 className="h-4 w-4" /></Btn>}
                       </div>
                     </td>
                   </tr>

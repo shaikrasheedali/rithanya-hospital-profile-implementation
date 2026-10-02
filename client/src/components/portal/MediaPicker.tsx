@@ -49,8 +49,8 @@ export function MediaPickerModal({
   const load = useCallback(async () => {
     setLoading(true);
     const r = await api<{ assets: Asset[] }>("/api/portal/media", "GET");
-    if (r.ok) setAssets(r.data!.assets);
-    else toast(r.error || "Could not load media", "err");
+    if (r.ok) setAssets(r.data!.assets ?? []);
+    else toast(r.error || "Could not load media — please try again.", "err");
     setLoading(false);
   }, [toast]);
   useEffect(() => {
@@ -71,22 +71,29 @@ export function MediaPickerModal({
   async function upload(files: FileList | File[]) {
     const list = Array.from(files);
     if (!list.length) return;
+    const tooBig = list.find((f) => f.size > 10 * 1024 * 1024 && f.type.startsWith("image/"));
+    if (tooBig) {
+      toast(`${tooBig.name} exceeds 10MB — please compress and retry.`, "err");
+      return;
+    }
     setUploading(true);
     const fd = new FormData();
     list.forEach((f) => fd.append("files", f));
     try {
       const res = await fetch("/api/portal/media", { method: "POST", body: fd });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Upload failed");
-      const added = ((json.assets ?? []) as Asset[]).map((a) => ({
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((json as { error?: string }).error || "Upload failed — please try again.");
+      const added = (((json as { assets?: Asset[] }).assets ?? []) as Asset[]).map((a) => ({
         id: a.filename || a.id,
         url: a.url || `/api/media/${a.filename || a.id}`,
         kind: a.kind || "IMAGE",
         originalName: a.originalName || a.filename || a.id,
         sizeInBytes: a.sizeInBytes || 2048,
       }));
-      if (json.errors?.length) toast(json.errors.join("; "), "err");
-      toast(`${added.length} file(s) uploaded & optimised`);
+      const errs = (json as { errors?: string[] }).errors ?? [];
+      if (errs.length) toast(errs.join("; "), "err");
+      if (added.length) toast(`${added.length} file(s) uploaded & optimised`);
+      else if (!errs.length) toast("No files were uploaded — please try again.", "err");
 
       // Merge into local assets state immediately so it is available without waiting
       setAssets((prev) => {
@@ -112,6 +119,7 @@ export function MediaPickerModal({
 
   const handlePickSelected = () => {
     const picked: Asset[] = [];
+    const missing: string[] = [];
     for (const id of sel) {
       const found = assets.find(
         (a) =>
@@ -125,16 +133,11 @@ export function MediaPickerModal({
       if (found) {
         picked.push(found);
       } else {
-        const clean = id.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
-        const isVideo = clean.endsWith(".mp4") || clean.endsWith(".webm") || clean.endsWith(".mov");
-        picked.push({
-          id: clean,
-          url: clean.startsWith("/") ? clean : `/api/media/${clean}`,
-          kind: isVideo ? "VIDEO" : "IMAGE",
-          originalName: clean,
-          sizeInBytes: 2048,
-        });
+        missing.push(id);
       }
+    }
+    if (missing.length) {
+      toast(`${missing.length} selected item(s) are no longer available — please reselect.`, "err");
     }
     if (picked.length) {
       onPick(picked);

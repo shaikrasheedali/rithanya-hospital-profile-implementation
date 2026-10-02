@@ -28,14 +28,28 @@ function copyDir(src, dest) {
   }
 }
 
-// Sync between server and root node_modules
-if (fs.existsSync(serverPrisma) && path.resolve(serverPrisma) !== path.resolve(rootPrisma)) {
-  copyDir(serverPrisma, rootPrisma);
-  console.log('[sync-prisma] Synced .prisma to root node_modules');
+// Sync between server and root node_modules — always propagate the NEWER build
+// (prisma generate outputs to root ../node_modules, so root is fresh after generate).
+// Copying stale over fresh destroys the just-generated client, so compare mtimes.
+function mtime(p) {
+  try {
+    return fs.statSync(p).mtimeMs;
+  } catch {
+    return 0;
+  }
 }
-if (fs.existsSync(rootPrisma) && path.resolve(serverPrisma) !== path.resolve(rootPrisma)) {
-  copyDir(rootPrisma, serverPrisma);
-  console.log('[sync-prisma] Synced .prisma to server node_modules');
+const serverIndex = path.join(serverPrisma, "client", "index.d.ts");
+const rootIndex = path.join(rootPrisma, "client", "index.d.ts");
+if (fs.existsSync(serverPrisma) && path.resolve(serverPrisma) !== path.resolve(rootPrisma)) {
+  const serverT = mtime(serverIndex);
+  const rootT = mtime(rootIndex);
+  if (rootT >= serverT && fs.existsSync(rootPrisma)) {
+    copyDir(rootPrisma, serverPrisma);
+    console.log("[sync-prisma] Synced .prisma from root (fresh) to server node_modules");
+  } else {
+    copyDir(serverPrisma, rootPrisma);
+    console.log("[sync-prisma] Synced .prisma to root node_modules");
+  }
 }
 
 // Ensure default.js and default.d.ts exist in all client locations

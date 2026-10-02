@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { HeartHandshake, Phone, ShieldCheck, Clock, Droplets, AlertCircle } from "lucide-react";
 import { Reveal } from "@/components/Reveal";
 import { PageHero, SectionHeading, EmptyState } from "@/components/site/ui";
@@ -18,14 +19,38 @@ type StockRow = {
 export default function BloodBankPage() {
   const [stock, setStock] = useState<StockRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [hotline, setHotline] = useState("8328581019");
+  const [threshold, setThreshold] = useState(3);
 
   useEffect(() => {
     document.title = "Live Blood Bank & Thalassemia Daycare | Rithanya Hospital";
+    let alive = true;
     fetch("/api/public/blood-stock")
-      .then((r) => r.json())
-      .then((d) => setStock(d.stock ?? []))
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
+      .then(async (r) => {
+        if (!r.ok) throw new Error("Could not load live blood stock — please call the hotline to confirm.");
+        return r.json();
+      })
+      .then((d) => { if (alive) setStock(d.stock ?? []); })
+      .catch((e) => {
+        if (!alive) return;
+        const msg = e instanceof Error ? e.message : "Could not load live blood stock — please try again.";
+        setError(msg);
+        toast.error(msg);
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    fetch("/api/public/settings")
+      .then(async (r) => {
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then((d) => {
+        if (!alive || !d?.settings) return;
+        if (d.settings.emergencyHotline) setHotline(d.settings.emergencyHotline);
+        if (typeof d.settings.criticalBloodAlertThreshold === "number") setThreshold(d.settings.criticalBloodAlertThreshold);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
   }, []);
 
   return (
@@ -51,13 +76,15 @@ export default function BloodBankPage() {
                 <div key={i} className="h-64 animate-pulse rounded-2xl bg-line/60" />
               ))}
             </div>
+          ) : error && stock.length === 0 ? (
+            <div className="text-center"><p role="alert" className="mx-auto max-w-xl rounded-xl border border-red-200 bg-red-50 p-6 font-medium text-red-900">{error}</p><button onClick={() => window.location.reload()} className="mt-6 rounded-full bg-royal px-6 py-3 font-semibold text-white">Try again</button></div>
           ) : stock.length === 0 ? (
             <EmptyState
               title="Updating inventory"
               text="Our blood bank team is currently updating live counts. Please call the emergency hotline directly."
             />
           ) : (
-            <BloodStockCards initial={stock} threshold={3} />
+            <BloodStockCards initial={stock} threshold={threshold} />
           )}
         </div>
 
@@ -77,10 +104,10 @@ export default function BloodBankPage() {
             </div>
             <div className="flex flex-wrap gap-3">
               <a
-                href={telHref("8328581019")}
+                href={telHref(hotline)}
                 className="inline-flex items-center gap-2 rounded-full bg-[#D32F2F] px-6 py-3 font-semibold text-white shadow-md transition-all hover:bg-red-700"
               >
-                <Phone className="h-4 w-4" /> Call 83285 81019
+                <Phone className="h-4 w-4" /> Call {prettyPhone(hotline)}
               </a>
               <Link
                 to="/contact"

@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { ArrowRight, Building2, CheckCircle2, Phone, ShieldCheck, Sparkles } from "lucide-react";
 import { Reveal } from "@/components/Reveal";
 import { PageHero, Cover, EmptyState } from "@/components/site/ui";
+import { telHref } from "@/lib/utils";
 import type { MediaRef } from "@/lib/utils";
 
 type FacilityItem = {
@@ -18,15 +20,35 @@ type FacilityItem = {
 export default function FacilitiesPage() {
   const [items, setItems] = useState<FacilityItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [hotline, setHotline] = useState("8328581019");
 
   useEffect(() => {
     document.title = "Hospital Facilities & Infrastructure | Rithanya Hospital";
     setLoading(true);
+    setError(null);
+    let alive = true;
     fetch("/api/public/facilities")
-      .then((r) => r.json())
-      .then((d) => setItems(d.items ?? []))
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
+      .then(async (r) => {
+        if (!r.ok) throw new Error("Could not load facilities — please try again.");
+        return r.json();
+      })
+      .then((d) => { if (alive) setItems(d.items ?? []); })
+      .catch((e) => {
+        if (!alive) return;
+        const msg = e instanceof Error ? e.message : "Could not load facilities — please try again.";
+        setError(msg);
+        toast.error(msg);
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    fetch("/api/public/settings")
+      .then(async (r) => {
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then((d) => { if (alive && d?.settings?.emergencyHotline) setHotline(d.settings.emergencyHotline); })
+      .catch(() => {});
+    return () => { alive = false; };
   }, []);
 
   return (
@@ -89,6 +111,8 @@ export default function FacilitiesPage() {
               <div key={i} className="h-96 animate-pulse rounded-2xl bg-line/60" />
             ))}
           </div>
+        ) : error ? (
+          <div className="text-center"><p role="alert" className="mx-auto max-w-xl rounded-xl border border-red-200 bg-red-50 p-6 font-medium text-red-900">{error}</p><button onClick={() => window.location.reload()} className="mt-6 rounded-full bg-royal px-6 py-3 font-semibold text-white">Try again</button></div>
         ) : items.length === 0 ? (
           <EmptyState
             title="Facilities list updating"
@@ -156,7 +180,7 @@ export default function FacilitiesPage() {
             </div>
             <div className="flex flex-wrap gap-4">
               <a
-                href="tel:08742234567"
+                href={telHref(hotline)}
                 className="inline-flex items-center gap-2 rounded-full bg-gold px-6 py-3 font-semibold text-navy shadow-md transition-all hover:bg-white"
               >
                 <Phone className="h-4 w-4" /> Call 24/7 Desk

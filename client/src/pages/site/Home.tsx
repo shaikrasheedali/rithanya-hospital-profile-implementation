@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import {
   Award,
   CalendarCheck,
@@ -67,15 +68,37 @@ function Loading() {
 
 export default function HomePage() {
   const [data, setData] = useState<HomeData | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = "Rithanya Hospital (రితన్య హాస్పిటల్) | Khammam | 24/7 Emergency, Thalassemia Daycare & Diabetology";
+    let alive = true;
     fetch("/api/public/home")
-      .then((r) => r.json())
-      .then(setData)
-      .catch(() => undefined);
+      .then(async (r) => {
+        if (!r.ok) throw new Error("Could not load homepage — please check your connection and try again.");
+        return r.json();
+      })
+      .then((d) => { if (alive) { setData(d); setLoadError(null); } })
+      .catch((e) => {
+        if (!alive) return;
+        const msg = e instanceof Error ? e.message : "Could not load homepage — please try again.";
+        setLoadError(msg);
+        toast.error(msg);
+      });
+    return () => { alive = false; };
   }, []);
 
+  if (loadError && !data) {
+    return (
+      <>
+        <Hero phone="8328581019" />
+        <div className="mx-auto max-w-3xl px-6 py-24 text-center sm:px-8">
+          <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-6 font-medium text-red-900">{loadError}</p>
+          <button onClick={() => window.location.reload()} className="mt-6 rounded-full bg-royal px-6 py-3 font-semibold text-white">Try again</button>
+        </div>
+      </>
+    );
+  }
   if (!data) return (<><Hero phone="8328581019" /><Loading /></>);
 
   const s = data.settings;

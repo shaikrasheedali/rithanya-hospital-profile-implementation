@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import SiteLayout from "@/pages/site/SiteLayout";
 import HomePage from "@/pages/site/Home";
 import AboutPage from "@/pages/site/About";
@@ -55,6 +55,11 @@ function NotFound() {
   );
 }
 
+function LegacyClinicalRedirect({ kind }: { kind: string }) {
+  const { slug } = useParams();
+  return <Navigate to={`/clinical-care/${kind}/${slug ?? ""}`} replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -69,11 +74,11 @@ export default function App() {
           <Route path="clinical-care/:type" element={<ClinicalTypePage />} />
           <Route path="clinical-care/:type/:slug" element={<ClinicalDetailPage />} />
           <Route path="specialties" element={<Navigate to="/clinical-care/specialties" replace />} />
-          <Route path="specialties/:slug" element={<Navigate to="/clinical-care/specialties/:slug" replace />} />
+          <Route path="specialties/:slug" element={<LegacyClinicalRedirect kind="specialties" />} />
           <Route path="treatments" element={<Navigate to="/clinical-care/treatments" replace />} />
-          <Route path="treatments/:slug" element={<Navigate to="/clinical-care/treatments/:slug" replace />} />
+          <Route path="treatments/:slug" element={<LegacyClinicalRedirect kind="treatments" />} />
           <Route path="services" element={<Navigate to="/clinical-care/services" replace />} />
-          <Route path="services/:slug" element={<Navigate to="/clinical-care/services/:slug" replace />} />
+          <Route path="services/:slug" element={<LegacyClinicalRedirect kind="services" />} />
           <Route path="doctors" element={<DoctorsPage />} />
           <Route path="doctors/:slug" element={<DoctorDetailPage />} />
           <Route path="products" element={<ProductsPage />} />

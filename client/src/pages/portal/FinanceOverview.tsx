@@ -4,7 +4,7 @@ import { formatINR } from "@/lib/utils";
 import { usePortalData, LoadingCard, ErrorCard } from "./hooks";
 
 export default function FinanceOverviewPage() {
-  const { data, loading, error } = usePortalData<{
+  const { data, loading, error, reload } = usePortalData<{
     totals: { credit: number; debit: number; net: number };
     months: Array<{ month: string; credit: number; debit: number; net: number }>;
     byCategory: Array<{ name: string; total: number }>;
@@ -18,7 +18,7 @@ export default function FinanceOverviewPage() {
   }, []);
 
   if (loading) return <LoadingCard />;
-  if (error || !data) return <ErrorCard error={error ?? "Load failed"} />;
+  if (error || !data) return <ErrorCard error={error ?? "Load failed"} onRetry={reload} />;
 
   const max = Math.max(1, ...data.months.map((m) => Math.max(m.credit, m.debit)));
 
@@ -60,7 +60,7 @@ export default function FinanceOverviewPage() {
                   style={{ height: Math.round((m.debit / max) * 120) + "px" }}
                   title={"Debit " + m.debit}
                 />
-                <p className="mt-2 text-xs">{m.month.slice(2)}</p>
+                <p className="mt-2 text-xs">{typeof m.month === "string" && m.month.length >= 7 ? m.month.slice(5) : m.month}</p>
               </div>
             ))}
           </div>

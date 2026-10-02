@@ -161,18 +161,41 @@ function LogVitalsModal({
     if (isNaN(pulseNum) || pulseNum < 20 || pulseNum > 250) {
       return toast("Please enter a valid Pulse rate between 20 and 250 bpm", "err");
     }
+    const sysNum = parseInt(vitals.bpSystolic, 10) || 120;
+    const diaNum = parseInt(vitals.bpDiastolic, 10) || 80;
+    if (sysNum < 50 || sysNum > 300 || diaNum < 30 || diaNum > 200) {
+      return toast("Please enter a valid blood pressure (sys 50–300, dia 30–200).", "err");
+    }
+    if (vitals.fastingGlucose && (Number(vitals.fastingGlucose) < 20 || Number(vitals.fastingGlucose) > 1000)) {
+      return toast("Fasting glucose looks out of range (20–1000 mg/dL).", "err");
+    }
+    if (vitals.postPrandialGlucose && (Number(vitals.postPrandialGlucose) < 20 || Number(vitals.postPrandialGlucose) > 1000)) {
+      return toast("Post-prandial glucose looks out of range (20–1000 mg/dL).", "err");
+    }
+    if (vitals.hbA1c && (Number(vitals.hbA1c) < 2 || Number(vitals.hbA1c) > 20)) {
+      return toast("HbA1c looks out of range (2–20%).", "err");
+    }
+    let recordedAt: string;
+    try {
+      const parsed = new Date(`${date} ${time}`);
+      if (Number.isNaN(parsed.getTime())) throw new Error("invalid");
+      recordedAt = parsed.toISOString();
+    } catch {
+      toast("Could not understand the date/time — please use YYYY-MM-DD and a valid time.", "err");
+      return;
+    }
 
     setBusy(true);
 
     const payload = {
       action: "vitals",
-      recordedAt: new Date(`${date} ${time}`).toISOString(),
+      recordedAt,
       timeSlot,
       haemoglobin: hbNum,
       spO2: spo2Num,
       pulse: pulseNum,
-      bpSystolic: parseInt(vitals.bpSystolic, 10) || 120,
-      bpDiastolic: parseInt(vitals.bpDiastolic, 10) || 80,
+      bpSystolic: sysNum,
+      bpDiastolic: diaNum,
       fastingGlucose: vitals.fastingGlucose ? parseFloat(vitals.fastingGlucose) : undefined,
       postPrandialGlucose: vitals.postPrandialGlucose ? parseFloat(vitals.postPrandialGlucose) : undefined,
       hbA1c: vitals.hbA1c ? parseFloat(vitals.hbA1c) : undefined,
@@ -547,6 +570,7 @@ export default function PatientProfilePage() {
   const [demoModal, setDemoModal] = useState(false);
   const [dischargeModal, setDischargeModal] = useState(false);
   const [dischargeNotes, setDischargeNotes] = useState("");
+  const [dischargeBusy, setDischargeBusy] = useState(false);
   const [cameraModal, setCameraModal] = useState(false);
 
   // Editable clinical fields
@@ -570,12 +594,11 @@ export default function PatientProfilePage() {
   }, [data]);
 
   if (loading) return <LoadingCard />;
-  if (error || !patient) return <ErrorCard error={error ?? "Patient profile not found"} />;
+  if (error || !patient) return <ErrorCard error={error ?? "Patient profile not found"} onRetry={reload} />;
 
-  // Latest vitals computation
-  const latestVital = patient.vitals && patient.vitals.length > 0
-    ? patient.vitals[patient.vitals.length - 1]
-    : null;
+  // Latest vitals computation (sorted by recordedAt — newest last)
+  const sortedVitals = [...(patient.vitals ?? [])].sort((a, b) => new Date(a.recordedAt).getTime() - new Date(b.recordedAt).getTime());
+  const latestVital = sortedVitals.length > 0 ? sortedVitals[sortedVitals.length - 1] : null;
 
   const backLink =
     patient.isDischarged
@@ -620,20 +643,33 @@ export default function PatientProfilePage() {
     if (!file) return;
 
     if (file.size > 8 * 1024 * 1024) {
-      return toast("Photo size exceeds 8MB limit", "err");
+      toast("Photo size exceeds 8MB limit — please compress and retry.", "err");
+      e.target.value = "";
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      toast("Consent photo must be an image file.", "err");
+      e.target.value = "";
+      return;
     }
 
     const reader = new FileReader();
+    reader.onerror = () => toast("Could not read the photo — please try another file.", "err");
     reader.onload = async () => {
-      const base64 = reader.result as string;
-      const res = await api(`/api/portal/r/patients/${patient!.id}`, "PUT", {
-        consentPhoto: base64,
-      });
-      if (!res.ok) return toast(res.error || "Failed to upload consent photo", "err");
-      toast("Consent photo uploaded and verified on profile");
-      reload?.();
+      try {
+        const base64 = reader.result as string;
+        const res = await api(`/api/portal/r/patients/${patient!.id}`, "PUT", {
+          consentPhoto: base64,
+        });
+        if (!res.ok) return toast(res.error || "Failed to upload consent photo — please try again.", "err");
+        toast("Consent photo uploaded and verified on profile");
+        reload?.();
+      } catch {
+        toast("Failed to upload consent photo — please try again.", "err");
+      }
     };
     reader.readAsDataURL(file);
+    e.target.value = "";
   }
 
   async function handleCameraCapture(base64: string) {
@@ -647,11 +683,14 @@ export default function PatientProfilePage() {
   }
 
   async function handleDischarge() {
+    if (dischargeBusy) return;
+    setDischargeBusy(true);
     const res = await api(`/api/portal/r/patients/${patient!.id}`, "POST", {
       action: "discharge",
       notes: dischargeNotes,
     });
-    if (!res.ok) return toast(res.error || "Failed to discharge patient", "err");
+    setDischargeBusy(false);
+    if (!res.ok) return toast(res.error || "Failed to discharge patient — please try again.", "err");
     toast(patient!.patientType === "INPATIENT" ? "Patient discharged successfully" : "Consultation closed successfully");
     setDischargeModal(false);
     reload?.();
@@ -1134,11 +1173,11 @@ export default function PatientProfilePage() {
           onClose={() => setDischargeModal(false)}
           footer={
             <>
-              <Btn variant="secondary" onClick={() => setDischargeModal(false)}>
+              <Btn variant="secondary" onClick={() => setDischargeModal(false)} disabled={dischargeBusy}>
                 Cancel
               </Btn>
-              <Btn variant="danger" onClick={handleDischarge}>
-                Confirm Discharge
+              <Btn variant="danger" onClick={handleDischarge} disabled={dischargeBusy}>
+                {dischargeBusy ? "Discharging…" : "Confirm Discharge"}
               </Btn>
             </>
           }

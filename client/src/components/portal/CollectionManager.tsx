@@ -71,8 +71,40 @@ export function CollectionManager({
   }
 
   async function save() {
+    for (const f of def.fields) {
+      if (f.required && !f.showIf) {
+        const val = values[f.name];
+        if (val === undefined || val === null || String(val).trim() === "") {
+          toast(`${f.label} is required.`, "err");
+          return;
+        }
+      }
+      if (f.required && f.showIf && f.showIf(values)) {
+        const val = values[f.name];
+        if (val === undefined || val === null || String(val).trim() === "") {
+          toast(`${f.label} is required.`, "err");
+          return;
+        }
+      }
+      if (f.max && typeof values[f.name] === "string" && (values[f.name] as string).length > f.max) {
+        toast(`${f.label} must be under ${f.max} characters.`, "err");
+        return;
+      }
+    }
+    if (media.length === 0) {
+      setMediaErr(true);
+      toast("Add at least one image or video.", "err");
+      return;
+    }
     setBusy(true);
-    const payload = { ...values, mediaIds: media.map((m) => m.id) };
+    const coerced: Record<string, unknown> = { ...values };
+    for (const f of def.fields) {
+      if (f.type === "number" || f.type === "decimal") {
+        const n = Number(coerced[f.name]);
+        coerced[f.name] = Number.isFinite(n) ? n : 0;
+      }
+    }
+    const payload = { ...coerced, mediaIds: media.map((m) => m.id) };
     const r =
       editing === "new"
         ? await api<{ ok: boolean; item?: Item }>(`/api/portal/cms/${collection}`, "POST", payload)
@@ -112,7 +144,7 @@ export function CollectionManager({
       case "textarea":
         control = (
           <>
-            <textarea rows={3} maxLength={f.max} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)} />
+            <textarea rows={3} maxLength={f.max} required={!!f.required} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)} />
             {f.max && <span className="mt-1 block text-right text-sm text-ink/60">{String(v ?? "").length}/{f.max}</span>}
           </>
         );
@@ -121,14 +153,14 @@ export function CollectionManager({
         control = <RichTextEditor key={String(editing === "new" ? "new" : (editing as Item)?.id)} value={String(v ?? "")} onChange={(h) => set(f.name, h)} />;
         break;
       case "number":
-        control = <input type="number" className={inputCls} value={String(v ?? 0)} onChange={(e) => set(f.name, e.target.value)} />;
+        control = <input type="number" required={!!f.required} className={inputCls} value={String(v ?? 0)} onChange={(e) => set(f.name, e.target.value === "" ? 0 : Number(e.target.value))} />;
         break;
       case "decimal":
-        control = <input type="number" step="0.01" min="0" className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)} />;
+        control = <input type="number" step="0.01" min="0" required={!!f.required} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value === "" ? 0 : Number(e.target.value))} />;
         break;
       case "select":
         control = (
-          <select className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)}>
+          <select required={!!f.required} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)}>
             {f.options?.map((o) => <option key={o}>{o}</option>)}
           </select>
         );
@@ -141,7 +173,7 @@ export function CollectionManager({
           </label>
         );
       default:
-        control = <input className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)} />;
+        control = <input required={!!f.required} maxLength={f.max} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)} />;
     }
     return (
       <Field key={f.name} label={f.label + (f.required ? " *" : "")} help={f.help} className={span}>

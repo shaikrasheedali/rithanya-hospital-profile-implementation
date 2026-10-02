@@ -35,32 +35,51 @@ export function MediaLibrary({ assets }: { assets: Asset[] }) {
 
   async function upload(files: FileList | null) {
     if (!files?.length) return;
+    const tooBig = Array.from(files).find((f) => f.size > 10 * 1024 * 1024);
+    if (tooBig) {
+      toast(`${tooBig.name} exceeds 10MB and was not uploaded.`, "err");
+      return;
+    }
     setUploading(true);
     const fd = new FormData();
     Array.from(files).forEach((f) => fd.append("files", f));
-    const res = await fetch("/api/portal/media", { method: "POST", body: fd });
-    const json = await res.json().catch(() => ({}));
-    setUploading(false);
-    if (!res.ok) return toast(json.error || "Upload failed", "err");
-    if (json.errors?.length) toast(json.errors.join("; "), "err");
-    toast(`${json.assets.length} file(s) uploaded & optimised to WebP`);
-    window.location.reload();
+    try {
+      const res = await fetch("/api/portal/media", { method: "POST", body: fd });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast((json as { error?: string }).error || "Upload failed — please try again.", "err");
+        return;
+      }
+      const errs = (json as { errors?: string[] }).errors ?? [];
+      if (errs.length) toast(errs.join("; "), "err");
+      const count = (json as { assets?: unknown[] }).assets?.length ?? 0;
+      if (count > 0) {
+        toast(`${count} file(s) uploaded & optimised to WebP`);
+        setTimeout(() => window.location.reload(), 1200);
+      } else if (!errs.length) {
+        toast("No files were uploaded — please try again.", "err");
+      }
+    } catch {
+      toast("Upload failed — please check your connection and try again.", "err");
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function del(a: Asset) {
     if (!confirm(`Delete ${a.originalName}?`)) return;
     const r = await api(`/api/portal/media/${a.id}`, "DELETE");
-    if (!r.ok) return toast(r.error || "Delete failed", "err");
+    if (!r.ok) return toast(r.error || "Delete failed — please try again.", "err");
     toast("Asset deleted");
     setView(null);
-    window.location.reload();
+    setTimeout(() => window.location.reload(), 1200);
   }
   async function purge() {
     if (!confirm(`Permanently delete ${unlinked.length} unlinked asset(s)?`)) return;
     const r = await api<{ removed: number }>("/api/portal/media/purge", "DELETE");
-    if (!r.ok) return toast(r.error || "Purge failed", "err");
+    if (!r.ok) return toast(r.error || "Purge failed — please try again.", "err");
     toast(`Removed ${r.data?.removed ?? 0} unlinked asset(s)`);
-    window.location.reload();
+    setTimeout(() => window.location.reload(), 1200);
   }
 
   return (
@@ -100,7 +119,14 @@ export function MediaLibrary({ assets }: { assets: Asset[] }) {
 
       {view && (
         <Modal title={view.originalName} onClose={() => setView(null)} size="lg"
-          footer={<><Btn variant="secondary" onClick={() => { navigator.clipboard.writeText(location.origin + view.url); toast("URL copied"); }}><Copy className="h-4 w-4" /> Copy URL</Btn><Btn variant="danger" disabled={(view.refs ?? 0) > 0} onClick={() => del(view)}><Trash2 className="h-4 w-4" /> Delete</Btn></>}>
+          footer={<><Btn variant="secondary" onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(location.origin + view.url);
+              toast("URL copied");
+            } catch {
+              toast("Could not copy — your browser blocked clipboard access.", "err");
+            }
+          }}><Copy className="h-4 w-4" /> Copy URL</Btn><Btn variant="danger" disabled={(view.refs ?? 0) > 0} onClick={() => del(view)}><Trash2 className="h-4 w-4" /> Delete</Btn></>}>
           <div className="overflow-hidden rounded-xl bg-navy">
             {view.kind === "VIDEO" ? <SafeVideo src={view.url} controls className="max-h-[60vh] w-full" /> :
               <SafeImg src={view.url} alt="" className="mx-auto max-h-[60vh] object-contain" />}

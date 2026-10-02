@@ -38,13 +38,28 @@ export function PayrollDesk({ employees, records, month, year, entityLabel, auth
 
   async function save() {
     if (!sel) return;
+    const lopNum = Number(lop);
+    const allowNum = Number(allow);
+    const dedNum = Number(ded);
+    if (!Number.isFinite(lopNum) || lopNum < 0 || lopNum > days) {
+      toast(`LOP days must be between 0 and ${days}.`, "err");
+      return;
+    }
+    if (!Number.isFinite(allowNum) || allowNum < 0) {
+      toast("Allowances must be 0 or more.", "err");
+      return;
+    }
+    if (!Number.isFinite(dedNum) || dedNum < 0) {
+      toast("Other deductions must be 0 or more.", "err");
+      return;
+    }
     setBusy(true);
-    const r = await api(`/api/portal/r/payroll`, "POST", { employeeId: sel.id, month, year, lopDays: lop, allowances: allow, otherDeductions: ded, signaturePaths: paths, signatureWidth: SIG_W, signatureHeight: SIG_H });
+    const r = await api(`/api/portal/r/payroll`, "POST", { employeeId: sel.id, month, year, lopDays: lopNum, allowances: allowNum, otherDeductions: dedNum, signaturePaths: paths, signatureWidth: SIG_W, signatureHeight: SIG_H });
     setBusy(false);
-    if (!r.ok) return toast(r.error || "Could not process payroll", "err");
+    if (!r.ok) return toast(r.error || "Could not process payroll — please try again.", "err");
     toast(paths.length ? "Payroll processed & signed" : "Payroll processed (unsigned)");
     setSel(null);
-    window.location.reload();
+    setTimeout(() => window.location.reload(), 1200);
   }
 
   return (

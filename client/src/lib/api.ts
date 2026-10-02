@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+
 export async function api<T = unknown>(
   url: string,
   method: "GET" | "POST" | "PUT" | "DELETE" = "GET",
@@ -18,13 +20,23 @@ export async function api<T = unknown>(
 }
 
 export async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`GET ${url} failed (${res.status})`);
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch {
+    throw new Error("Network error — please check your connection and try again.");
+  }
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}) as { error?: string });
+    throw new Error((json as { error?: string }).error || `Request failed (${res.status}) — please try again.`);
+  }
   return res.json() as Promise<T>;
 }
 
 export function useDocumentTitle(title: string) {
-  if (typeof document !== "undefined") {
-    document.title = title;
-  }
+  useEffect(() => {
+    if (typeof document !== "undefined" && title) {
+      document.title = title;
+    }
+  }, [title]);
 }

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { CalendarCheck, CheckCircle2, X } from "lucide-react";
+import { toast } from "sonner";
 
 type Ctx = { open: (department?: string, source?: string) => void };
 const BookingCtx = createContext<Ctx>({ open: () => {} });
@@ -35,6 +36,22 @@ export function AppointmentForm({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    const digits = f.phone.replace(/\D/g, "");
+    if (digits.length < 10) {
+      const msg = "Please enter a valid 10-digit mobile number.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
+    if (f.preferredDate) {
+      const today = new Date().toISOString().slice(0, 10);
+      if (f.preferredDate < today) {
+        const msg = "Preferred date cannot be in the past.";
+        setError(msg);
+        toast.error(msg);
+        return;
+      }
+    }
     setState("busy");
     setError("");
     try {
@@ -43,11 +60,14 @@ export function AppointmentForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...f, source }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not submit");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { error?: string }).error || "Could not submit — please try again.");
       setState("done");
+      toast.success("Appointment request received. Our front desk will call you shortly.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not submit");
+      const msg = err instanceof Error ? err.message : "Could not submit — please try again.";
+      setError(msg);
+      toast.error(msg);
       setState("idle");
     }
   }
@@ -75,7 +95,7 @@ export function AppointmentForm({
         </label>
         <label className="block">
           <span className="mb-1 block text-sm font-semibold text-navy">Mobile number *</span>
-          <input required type="tel" inputMode="tel" className={input} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} autoComplete="tel" />
+          <input required type="tel" inputMode="tel" pattern="[0-9+()\\-\\s]{10,15}" title="Enter a valid 10-digit mobile number" className={input} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} autoComplete="tel" />
         </label>
         <label className="block">
           <span className="mb-1 block text-sm font-semibold text-navy">Department</span>

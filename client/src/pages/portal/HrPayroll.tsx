@@ -5,9 +5,11 @@ import { usePortalData, LoadingCard, ErrorCard } from "./hooks";
 
 export default function HrPayrollPage() {
   const [sp] = useSearchParams();
-  const month = sp.get("month") ?? String(new Date().getMonth() + 1);
-  const year = sp.get("year") ?? String(new Date().getFullYear());
-  const { data, loading, error } = usePortalData<{
+  const rawMonth = Number(sp.get("month") ?? (new Date().getMonth() + 1));
+  const rawYear = Number(sp.get("year") ?? new Date().getFullYear());
+  const month = Number.isFinite(rawMonth) ? Math.min(12, Math.max(1, Math.floor(rawMonth))) : new Date().getMonth() + 1;
+  const year = Number.isFinite(rawYear) ? Math.min(2100, Math.max(2000, Math.floor(rawYear))) : new Date().getFullYear();
+  const { data, loading, error, reload } = usePortalData<{
     employees: any[];
     records: any[];
     month: number;
@@ -17,7 +19,7 @@ export default function HrPayrollPage() {
 
   useEffect(() => { document.title = "Payroll | Rithanya HMS"; }, []);
   if (loading) return <LoadingCard />;
-  if (error || !data) return <ErrorCard error={error ?? "Load failed"} />;
+  if (error || !data) return <ErrorCard error={error ?? "Load failed"} onRetry={reload} />;
 
   const emps = data.employees.map((e: any) => ({
     id: e.id,

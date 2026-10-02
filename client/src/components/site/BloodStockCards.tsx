@@ -19,54 +19,53 @@ const THEME: Record<string, { bg: string; fg: string; sub: string; bar: string; 
   AB: { bg: "#F8FAFC", fg: "#0A2540", sub: "rgba(10,37,64,0.78)", bar: "#0D47A1", ring: "rgba(10,37,64,0.14)" },
 };
 
-const fmt = (d: string | Date) =>
-  new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });
+const fmt = (d: string | Date) => {
+  const t = new Date(d);
+  if (Number.isNaN(t.getTime())) return "—";
+  return t.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });
+};
 
 function normalizeStock(items: StockRow[]): StockRow[] {
   if (!items || !items.length) return [];
+  const order = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
+  const shortOrder = ["O", "A", "B", "AB"];
   const hasPlusMinus = items.some((i) => i.bloodGroup.includes("+") || i.bloodGroup.includes("-"));
-  if (hasPlusMinus && items.length >= 8) {
-    const order = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
+  if (hasPlusMinus) {
     return [...items].sort((a, b) => {
       const ia = order.indexOf(a.bloodGroup);
       const ib = order.indexOf(b.bloodGroup);
       return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
     });
   }
-  const order = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
-  const byGroup = new Map(items.map((i) => [i.bloodGroup, i]));
-  return order.map((g) => {
-    if (byGroup.has(g)) return byGroup.get(g)!;
-    const base = g.replace(/[+-]/g, "");
-    const parent = byGroup.get(base);
-    const isNeg = g.includes("-");
-    return {
-      id: `bs-${g.toLowerCase().replace("+", "p").replace("-", "n")}`,
-      bloodGroup: g,
-      groupCategory: base,
-      wholeBloodUnits: parent ? Math.max(1, Math.round(parent.wholeBloodUnits * (isNeg ? 0.6 : 1))) : (isNeg ? 5 : 10),
-      plasmaUnits: parent ? Math.max(1, Math.round(parent.plasmaUnits * (isNeg ? 0.6 : 1))) : (isNeg ? 4 : 8),
-      lastUpdated: parent?.lastUpdated ?? new Date(),
-    };
+  return [...items].sort((a, b) => {
+    const key = (x: StockRow) => x.bloodGroup || x.groupCategory;
+    return shortOrder.indexOf(key(a)) - shortOrder.indexOf(key(b));
   });
 }
 
 export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; threshold: number }) {
   const [stock, setStock] = useState(() => normalizeStock(initial));
   const [checked, setChecked] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     const pull = async () => {
       try {
         const r = await fetch("/api/public/blood-stock", { cache: "no-store" });
-        if (!r.ok) return;
+        if (!r.ok) {
+          if (alive) setLoadError("Live stock is temporarily unavailable — showing last synced data. Please call the hotline to confirm.");
+          return;
+        }
         const d = (await r.json()) as { stock: StockRow[] };
         if (alive && d.stock) {
           setStock(normalizeStock(d.stock));
+          setLoadError(null);
           setChecked(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }));
         }
-      } catch {}
+      } catch {
+        if (alive) setLoadError("Live stock is temporarily unavailable — showing last synced data. Please call the hotline to confirm.");
+      }
     };
     pull();
     const t = setInterval(pull, 30000);
@@ -76,8 +75,22 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
     };
   }, []);
 
-  const latest = stock.reduce<string | null>((a, s) => (!a || new Date(s.lastUpdated) > new Date(a) ? new Date(s.lastUpdated).toISOString() : a), null);
+  const latest = stock.reduce<string | null>((a, s) => {
+    const t = new Date(s.lastUpdated);
+    if (Number.isNaN(t.getTime())) return a;
+    const iso = t.toISOString();
+    return (!a || t > new Date(a) ? iso : a);
+  }, null);
   const max = Math.max(20, ...stock.flatMap((s) => [s.wholeBloodUnits, s.plasmaUnits]));
+
+  if (stock.length === 0) {
+    return (
+      <div className="rounded-2xl border border-white/15 bg-white/5 p-8 text-center text-white/85">
+        <p className="font-semibold text-white">Live stock is temporarily unavailable.</p>
+        <p className="mt-1">Please call the emergency hotline to confirm availability.</p>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -95,6 +108,7 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
             <RefreshCw className="h-4 w-4" /> Checked {checked}
           </span>
         )}
+        {loadError && <span role="alert" className="w-full text-sm text-white/75">{loadError}</span>}
       </div>
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {stock.map((s) => {

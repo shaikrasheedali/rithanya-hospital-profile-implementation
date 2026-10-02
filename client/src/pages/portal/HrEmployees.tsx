@@ -4,10 +4,10 @@ import { EntityPicker } from "@/components/portal/ui";
 import { usePortalData, LoadingCard, ErrorCard } from "./hooks";
 
 export default function HrEmployeesPage() {
-  const { data, loading, error } = usePortalData<{ items: any[]; entity: string }>("/api/portal/employees");
+  const { data, loading, error, reload } = usePortalData<{ items: any[]; entity: string }>("/api/portal/employees");
   useEffect(() => { document.title = "Employees | Rithanya HMS"; }, []);
   if (loading) return <LoadingCard />;
-  if (error || !data) return <ErrorCard error={error ?? "Load failed"} />;
+  if (error || !data) return <ErrorCard error={error ?? "Load failed"} onRetry={reload} />;
 
   const entityName = data.entity === "RVBC" ? "RVBC (Voluntary Blood Centre)" : "Rithanya Hospital";
 

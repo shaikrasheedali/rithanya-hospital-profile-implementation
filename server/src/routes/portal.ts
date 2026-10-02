@@ -140,12 +140,23 @@ router.delete("/media/purge", requireAuth("cms"), async (req, res) => {
   const user = getUser(req);
   const assets = await listAssets();
   const unlinked = assets.filter((a) => a.refs === 0);
+  let removed = 0;
+  const errors: string[] = [];
   for (const a of unlinked) {
-    await prisma.mediaAsset.delete({ where: { id: a.id } });
-    await deleteAssetFile(a);
+    try {
+      await withDbTimeout(prisma.mediaAsset.delete({ where: { id: a.id } }), 2500);
+      await deleteAssetFile(a);
+      removed += 1;
+    } catch (e) {
+      errors.push(`${a.originalName}: ${e instanceof Error ? e.message : "delete failed"}`);
+    }
   }
-  await audit(user, "PURGE_MEDIA", "MediaAsset", null, `${unlinked.length} removed`);
-  res.json({ ok: true, removed: unlinked.length });
+  await audit(user, "PURGE_MEDIA", "MediaAsset", null, `${removed} removed`);
+  if (removed === 0 && unlinked.length > 0) {
+    res.status(409).json({ error: errors[0] ?? "Could not purge — assets may still be linked." });
+    return;
+  }
+  res.json({ ok: true, removed, errors });
 });
 
 router.delete("/media/:id", requireAuth("cms"), async (req, res) => {

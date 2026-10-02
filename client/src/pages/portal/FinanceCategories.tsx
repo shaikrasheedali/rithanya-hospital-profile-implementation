@@ -4,7 +4,7 @@ import { EntityPicker } from "@/components/portal/ui";
 import { usePortalData, LoadingCard, ErrorCard } from "./hooks";
 
 export default function FinanceCategoriesPage() {
-  const { data, loading, error } = usePortalData<{
+  const { data, loading, error, reload } = usePortalData<{
     items: any[];
     entity: string;
     entityLabel: string;
@@ -15,7 +15,7 @@ export default function FinanceCategoriesPage() {
   }, []);
 
   if (loading) return <LoadingCard />;
-  if (error || !data) return <ErrorCard error={error ?? "Load failed"} />;
+  if (error || !data) return <ErrorCard error={error ?? "Load failed"} onRetry={reload} />;
 
   return (
     <CrudManager

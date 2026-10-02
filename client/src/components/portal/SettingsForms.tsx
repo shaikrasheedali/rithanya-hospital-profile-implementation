@@ -20,12 +20,26 @@ export function MasterSettingsForm({ s }: { s: S }) {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    const phoneDigits = v.emergencyHotline.replace(/\D/g, "");
+    if (phoneDigits.length < 10) {
+      toast("Emergency hotline must contain at least 10 digits.", "err");
+      return;
+    }
+    if (v.secondaryHotline && v.secondaryHotline.replace(/\D/g, "").length < 10) {
+      toast("Secondary line must contain at least 10 digits (or be left blank).", "err");
+      return;
+    }
+    const threshold = Number(v.criticalBloodAlertThreshold);
+    if (!Number.isFinite(threshold) || threshold < 0) {
+      toast("Blood bank threshold must be 0 or more.", "err");
+      return;
+    }
     setBusy(true);
-    const r = await api("/api/portal/r/settings/master", "PUT", v);
+    const r = await api("/api/portal/r/settings/master", "PUT", { ...v, criticalBloodAlertThreshold: threshold });
     setBusy(false);
-    if (!r.ok) return toast(r.error || "Save failed", "err");
+    if (!r.ok) return toast(r.error || "Save failed — please try again.", "err");
     toast("Master identity saved");
-    window.location.reload();
+    setTimeout(() => window.location.reload(), 1200);
   }
 
   return (
@@ -91,12 +105,25 @@ export function SeoSettingsForm({ s }: { s: S }) {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (v.canonicalUrl) {
+      try {
+        const u = new URL(v.canonicalUrl);
+        if (!["http:", "https:"].includes(u.protocol)) throw new Error("bad protocol");
+      } catch {
+        toast("Canonical URL must be a valid http(s) URL.", "err");
+        return;
+      }
+    }
+    if (v.seoPageTitle.length > 70) {
+      toast("SEO title should be under 70 characters.", "err");
+      return;
+    }
     setBusy(true);
     const r = await api("/api/portal/r/settings/seo", "PUT", v);
     setBusy(false);
-    if (!r.ok) return toast(r.error || "Save failed", "err");
+    if (!r.ok) return toast(r.error || "Save failed — please try again.", "err");
     toast("SEO & social metadata saved");
-    window.location.reload();
+    setTimeout(() => window.location.reload(), 1200);
   }
 
   return (

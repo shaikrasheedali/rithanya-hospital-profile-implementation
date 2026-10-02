@@ -12,7 +12,15 @@ export default function AboutPage() {
 
   useEffect(() => {
     document.title = "About Us | Rithanya Hospital";
-    fetch("/api/public/gallery?limit=6").then((r) => r.json()).then((d) => setGallery(d.items ?? [])).catch(() => undefined);
+    let alive = true;
+    fetch("/api/public/gallery?limit=6")
+      .then(async (r) => {
+        if (!r.ok) return { items: [] };
+        return r.json();
+      })
+      .then((d) => { if (alive) setGallery(d.items ?? []); })
+      .catch(() => { /* gallery is decorative — keep static content */ });
+    return () => { alive = false; };
   }, []);
 
   return (

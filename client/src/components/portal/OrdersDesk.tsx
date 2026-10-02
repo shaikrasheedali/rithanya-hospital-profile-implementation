@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, MapPin, Phone, Radio } from "lucide-react";
 import { Badge, Btn, Card, Empty, PageHeader, api, inputCls, useToast } from "@/components/portal/ui";
 import { formatDate, formatINR } from "@/lib/utils";
@@ -18,24 +18,22 @@ export function OrdersDesk({ orders }: { orders: OrderDTO[] }) {
   const toast = useToast();
   const [f, setF] = useState("ALL");
   const [openId, setOpenId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const t = setInterval(() => window.location.reload(), 20000);
-    return () => clearInterval(t);
-  }, []);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   async function setStatus(id: string, status: string) {
+    setBusyId(id);
     const r = await api(`/api/portal/r/orders/${id}`, "PUT", { status });
-    if (!r.ok) return toast(r.error || "Update failed", "err");
-    toast(`Order marked ${status}`);
-    window.location.reload();
+    setBusyId(null);
+    if (!r.ok) return toast(r.error || "Update failed — please try again.", "err");
+    toast(`Order marked ${status.toLowerCase()}`);
+    setTimeout(() => window.location.reload(), 1200);
   }
-  const list = orders.filter((o) => f === "ALL" || o.status === f);
+  const list = (orders ?? []).filter((o) => f === "ALL" || o.status === f);
 
   return (
     <>
       <PageHeader title="Orders dispatch desk" desc="Live feed of storefront orders. Move each order through Pending → Paid → Processing → Dispatched → Delivered (cancelling restores stock).">
-        <span className="flex items-center gap-2 text-base text-ink/70"><Radio className="h-4 w-4 animate-pulse text-emerald-600" /> Auto-refreshing every 20 s</span>
+        <button onClick={() => window.location.reload()} className="flex items-center gap-2 text-base text-ink/70 hover:text-royal"><Radio className="h-4 w-4 text-emerald-600" /> Refresh list</button>
       </PageHeader>
       <div className="mb-4 flex flex-wrap gap-2">
         {["ALL", ...FLOW, "CANCELLED"].map((s) => (

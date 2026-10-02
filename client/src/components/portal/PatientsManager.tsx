@@ -59,11 +59,28 @@ function PatientForm({ initial, type, cats, onDone, onCancel }: { initial?: Pati
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((s) => ({ ...s, [k]: v }));
 
   async function save() {
+    if (f.fullName.trim().length < 2) {
+      toast("Full name must be at least 2 characters.", "err");
+      return;
+    }
+    if (f.contactNumber.replace(/\D/g, "").length < 10) {
+      toast("Contact number must contain at least 10 digits.", "err");
+      return;
+    }
+    const ageNum = Number(f.age);
+    if (!Number.isFinite(ageNum) || ageNum < 0 || ageNum > 120) {
+      toast("Age must be between 0 and 120.", "err");
+      return;
+    }
+    if (type === "INPATIENT" && !f.roomBedNumber.trim()) {
+      toast("Room / bed number is required for inpatients.", "err");
+      return;
+    }
     setBusy(true);
-    const body = { ...f, patientType: type, consentPhoto: f.consentPhoto || undefined };
+    const body = { ...f, age: ageNum, patientType: type, consentPhoto: f.consentPhoto || undefined };
     const r = initial ? await api(`/api/portal/r/patients/${initial.id}`, "PUT", body) : await api("/api/portal/r/patients", "POST", body);
     setBusy(false);
-    if (!r.ok) return toast(r.error || "Could not save", "err");
+    if (!r.ok) return toast(r.error || "Could not save — please try again.", "err");
     toast(initial ? "Record updated" : type === "INPATIENT" ? "Patient admitted" : "Outpatient registered");
     onDone();
   }
@@ -77,9 +94,9 @@ function PatientForm({ initial, type, cats, onDone, onCancel }: { initial?: Pati
       footer={<><Btn variant="secondary" onClick={onCancel}>Cancel</Btn><Btn onClick={save} disabled={busy}>{busy ? "Saving…" : initial ? "Save changes" : type === "INPATIENT" ? "Admit patient" : "Register"}</Btn></>}
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Full name *"><input className={inputCls} value={f.fullName} onChange={(e) => set("fullName", e.target.value)} /></Field>
-        <Field label="Contact number *"><input type="tel" className={inputCls} value={f.contactNumber} onChange={(e) => set("contactNumber", e.target.value)} /></Field>
-        <Field label="Age *"><input type="number" min={0} max={120} className={inputCls} value={f.age} onChange={(e) => set("age", e.target.value)} /></Field>
+        <Field label="Full name *"><input required minLength={2} className={inputCls} value={f.fullName} onChange={(e) => set("fullName", e.target.value)} /></Field>
+        <Field label="Contact number *"><input required type="tel" pattern="[0-9+()\-\s]{10,15}" title="Enter a valid phone number" className={inputCls} value={f.contactNumber} onChange={(e) => set("contactNumber", e.target.value)} /></Field>
+        <Field label="Age *"><input required type="number" min={0} max={120} className={inputCls} value={f.age} onChange={(e) => set("age", e.target.value)} /></Field>
         <Field label="Gender"><select className={inputCls} value={f.gender} onChange={(e) => set("gender", e.target.value)}><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option></select></Field>
         <Field label="Blood group"><select className={inputCls} value={f.bloodGroup} onChange={(e) => set("bloodGroup", e.target.value)}>{BLOOD.map((b) => <option key={b}>{b}</option>)}</select></Field>
         <Field label="Diagnosis category"><select className={inputCls} value={f.categoryId} onChange={(e) => set("categoryId", e.target.value)}><option value="">— Unassigned —</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
@@ -99,11 +116,22 @@ function PatientForm({ initial, type, cats, onDone, onCancel }: { initial?: Pati
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = () => set("consentPhoto", reader.result as string);
-                      reader.readAsDataURL(file);
+                    if (!file) return;
+                    if (file.size > 8 * 1024 * 1024) {
+                      toast("Photo must be under 8MB.", "err");
+                      e.target.value = "";
+                      return;
                     }
+                    if (!file.type.startsWith("image/")) {
+                      toast("Consent photo must be an image file.", "err");
+                      e.target.value = "";
+                      return;
+                    }
+                    const reader = new FileReader();
+                    reader.onerror = () => toast("Could not read the photo — please try another file.", "err");
+                    reader.onload = () => set("consentPhoto", reader.result as string);
+                    reader.readAsDataURL(file);
+                    e.target.value = "";
                   }}
                 />
               </label>

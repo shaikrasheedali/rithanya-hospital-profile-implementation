@@ -1,7 +1,8 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, X } from "lucide-react";
+import { X } from "lucide-react";
+import { toast } from "sonner";
 
 export async function api<T = unknown>(
   url: string,
@@ -31,31 +32,20 @@ export async function api<T = unknown>(
   }
 }
 
-/* ---------- Toasts ---------- */
-type Toast = { id: number; msg: string; kind: "ok" | "err" };
-const ToastCtx = createContext<(msg: string, kind?: "ok" | "err") => void>(() => {});
+/* ---------- Toasts (sonner-backed; keeps legacy useToast API) ---------- */
+type Toast = (msg: string, kind?: "ok" | "err") => void;
+const ToastCtx = createContext<Toast>((msg, kind = "ok") => {
+  if (kind === "err") toast.error(msg);
+  else toast.success(msg);
+});
 export const useToast = () => useContext(ToastCtx);
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [list, setList] = useState<Toast[]>([]);
-  const push = useCallback((msg: string, kind: "ok" | "err" = "ok") => {
-    const id = Date.now() + Math.random();
-    setList((l) => [...l, { id, msg, kind }]);
-    setTimeout(() => setList((l) => l.filter((t) => t.id !== id)), kind === "err" ? 6000 : 3500);
+  const push = useCallback<Toast>((msg, kind = "ok") => {
+    if (kind === "err") toast.error(msg || "Something went wrong — please try again.");
+    else toast.success(msg);
   }, []);
-  return (
-    <ToastCtx.Provider value={push}>
-      {children}
-      <div className="no-print fixed bottom-5 left-1/2 z-[200] flex w-full max-w-md -translate-x-1/2 flex-col gap-2 px-4" aria-live="polite">
-        {list.map((t) => (
-          <div key={t.id} role="status" className={`flex items-start gap-3 rounded-xl border p-4 text-base font-medium shadow-xl ${t.kind === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"}`}>
-            {t.kind === "ok" ? <CheckCircle2 className="mt-0.5 h-5 w-5 flex-none" /> : <AlertCircle className="mt-0.5 h-5 w-5 flex-none" />}
-            {t.msg}
-          </div>
-        ))}
-      </div>
-    </ToastCtx.Provider>
-  );
+  return <ToastCtx.Provider value={push}>{children}</ToastCtx.Provider>;
 }
 
 /* ---------- Modal ---------- */

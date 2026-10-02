@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { Reveal } from "@/components/Reveal";
 import { PageHero, Cover, EmptyState } from "@/components/site/ui";
 import type { MediaRef } from "@/lib/utils";
@@ -8,15 +9,34 @@ type Doctor = { id: string; slug: string; fullName: string; qualifications: stri
 
 export default function DoctorsPage() {
   const [items, setItems] = useState<Doctor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     document.title = "Doctors | Rithanya Hospital";
-    fetch("/api/public/doctors").then((r) => r.json()).then((d) => setItems(d.items ?? [])).catch(() => undefined);
+    let alive = true;
+    setLoading(true);
+    fetch("/api/public/doctors")
+      .then(async (r) => {
+        if (!r.ok) throw new Error("Could not load doctors — please try again.");
+        return r.json();
+      })
+      .then((d) => { if (alive) { setItems(d.items ?? []); setError(null); } })
+      .catch((e) => {
+        if (!alive) return;
+        const msg = e instanceof Error ? e.message : "Could not load doctors — please try again.";
+        setError(msg);
+        toast.error(msg);
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, []);
   return (
     <>
       <PageHero eyebrow="Medical team" title="Meet our doctors" desc="Experienced physicians and visiting specialists — unhurried consultations, clear explanations." />
       <section className="mx-auto max-w-7xl px-6 py-16 sm:px-8 lg:py-24">
-        {items.length === 0 ? <EmptyState title="Loading…" text="Fetching doctor profiles." /> : (
+        {loading ? <EmptyState title="Loading…" text="Fetching doctor profiles." />
+        : error ? <div className="text-center"><p role="alert" className="mx-auto max-w-xl rounded-xl border border-red-200 bg-red-50 p-6 font-medium text-red-900">{error}</p><button onClick={() => window.location.reload()} className="mt-6 rounded-full bg-royal px-6 py-3 font-semibold text-white">Try again</button></div>
+        : items.length === 0 ? <EmptyState title="No doctors found" text="Doctor profiles are being updated. Please check back shortly." /> : (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {items.map((d, i) => (
               <Reveal key={d.id} delay={(i % 3) * 70}>

@@ -1,5 +1,6 @@
 "use client";
 import { Link, useLocation } from "react-router-dom";
+import { toast } from "sonner";
 
 
 import { useEffect, useState } from "react";
@@ -114,13 +115,17 @@ export function PortalShell({
   const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => !i.module || user.modules[i.module]) })).filter((g) => g.items.length);
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
+    try {
+      const r = await fetch("/api/auth/logout", { method: "POST" });
+      if (!r.ok) {
+        toast.error("Logout failed — please try again.");
+        return;
+      }
+    } catch {
+      toast.error("Logout failed — please check your connection and try again.");
+      return;
+    }
     window.location.href = "/portal/login";
-    window.location.reload();
-  }
-  function switchEntity(v: string) {
-    document.cookie = `rh_entity=${v}; path=/; max-age=31536000; samesite=lax`;
-    window.location.reload();
   }
 
   const nav = (
