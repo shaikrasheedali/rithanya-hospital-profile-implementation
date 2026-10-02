@@ -1,6 +1,5 @@
 /* Exhaustive backend E2E: every endpoint × method × valid/invalid/edge inputs.
- * Spawns the BUILT server (node dist/src/index.js) on PORT 4455 against a
- * throwaway copy of the SQLite DB, runs ~130 assertions, then cleans up.
+ * Spawns the BUILT server (node dist/src/index.js) on PORT 4455, runs ~130 assertions, then cleans up.
  *
  * Run:  npm run build && npm run test:e2e
  */
@@ -12,8 +11,6 @@ import sharp from "sharp";
 const PORT = 4455;
 const BASE = `http://localhost:${PORT}`;
 const SERVER_DIR = process.cwd();
-const DB_SRC = path.join(SERVER_DIR, "prisma", "dev.db");
-const DB_TEST = path.join(SERVER_DIR, "prisma", "test-e2e.db");
 
 let pass = 0;
 let fail = 0;
@@ -78,13 +75,9 @@ async function waitForHealth(child: ChildProcess): Promise<void> {
 }
 
 async function main() {
-  // Fresh throwaway DB copy
-  await fs.rm(DB_TEST, { force: true });
-  await fs.copyFile(DB_SRC, DB_TEST);
-
   const child = spawn("node", ["dist/src/index.js"], {
     cwd: SERVER_DIR,
-    env: { ...process.env, PORT: String(PORT), DATABASE_URL: "file:./prisma/test-e2e.db" },
+    env: { ...process.env, PORT: String(PORT) },
     stdio: "ignore",
   });
   const cleanupUploads: string[] = [];
@@ -505,16 +498,6 @@ async function main() {
       try {
         await fs.rm(path.join(SERVER_DIR, f), { force: true });
       } catch { /* ignore */ }
-    }
-    // better-sqlite3 may hold the file briefly after SIGKILL — retry deletion.
-    for (let i = 0; i < 10; i++) {
-      try {
-        await fs.rm(DB_TEST, { force: true });
-        await fs.rm(DB_TEST + "-journal", { force: true });
-        break;
-      } catch {
-        await new Promise((r) => setTimeout(r, 500));
-      }
     }
   }
 }

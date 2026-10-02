@@ -1,16 +1,15 @@
-// Prisma 7 configuration: datasource URL lives here (not in schema.prisma).
 import "dotenv/config";
-import path from "node:path";
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 
-function sqliteUrl(): string {
-  const raw = env("DATABASE_URL") || "file:./prisma/dev.db";
-  if (!raw.startsWith("file:")) return raw;
-  const p = raw.slice("file:".length);
-  if (path.isAbsolute(p)) return raw;
-  // Resolve relative SQLite paths against the server directory (this file's parent),
-  // so dev (`tsx`) and prod (`node dist/...`, cwd = server/) use the same file.
-  return `file:${path.join(__dirname, p)}`;
+function getDatabaseUrl(): string {
+  const raw = process.env.DATABASE_URL;
+  if (raw && !raw.startsWith("file:")) return raw;
+  const host = process.env.DB_HOST || "localhost";
+  const port = process.env.DB_PORT || "3306";
+  const user = encodeURIComponent(process.env.DB_USER || "root");
+  const password = encodeURIComponent(process.env.DB_PASSWORD || "");
+  const database = process.env.DB_NAME || "rithanya";
+  return `mysql://${user}:${password}@${host}:${port}/${database}`;
 }
 
 export default defineConfig({
@@ -20,6 +19,6 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts",
   },
   datasource: {
-    url: sqliteUrl(),
+    url: getDatabaseUrl(),
   },
 });

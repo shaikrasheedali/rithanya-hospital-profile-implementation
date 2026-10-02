@@ -2,7 +2,7 @@
   "name": "rithanya-server",
   "version": "1.0.0",
   "private": true,
-  "description": "Rithanya Hospital Express + Prisma SQLite backend (serves built Vite frontend)",
+  "description": "Rithanya Hospital Express + Prisma MySQL backend (serves built Vite frontend)",
   "type": "commonjs",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -22,9 +22,8 @@
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.1",
-    "@prisma/adapter-better-sqlite3": "^7.10.0",
+    "@prisma/adapter-mariadb": "^7.10.0",
     "@prisma/client": "^7.10.0",
-    "better-sqlite3": "^13.0.3",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "dotenv": "^18.0.5",
@@ -32,6 +31,7 @@
     "express-rate-limit": "^8.7.0",
     "helmet": "^8.0.0",
     "jose": "^6.0.11",
+    "mariadb": "^3.5.4",
     "morgan": "^1.10.0",
     "multer": "^2.4.0",
     "mysql2": "^3.24.5",
@@ -39,7 +39,6 @@
     "sharp": "^0.35.5"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
     "@types/cookie-parser": "^1.4.8",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",

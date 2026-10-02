@@ -30,6 +30,15 @@ export default function FinanceCategoriesPage() {
         { key: "description", label: "Notes" },
       ]}
       fields={[
+        {
+          name: "entity",
+          label: "Entity",
+          type: "select",
+          options: [
+            { value: "RITHANYA_HOSPITAL", label: "Rithanya Hospital" },
+            { value: "RVBC", label: "RVBC (Voluntary Blood Centre)" },
+          ],
+        },
         { name: "name", label: "Category name", type: "text", required: true },
         { name: "description", label: "Notes", type: "textarea" },
       ]}

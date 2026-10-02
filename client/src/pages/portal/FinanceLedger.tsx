@@ -37,6 +37,15 @@ export default function FinanceLedgerPage() {
         { key: "entryDate", label: "Date", kind: "date" },
       ]}
       fields={[
+        {
+          name: "entity",
+          label: "Entity",
+          type: "select",
+          options: [
+            { value: "RITHANYA_HOSPITAL", label: "Rithanya Hospital" },
+            { value: "RVBC", label: "RVBC (Voluntary Blood Centre)" },
+          ],
+        },
         { name: "type", label: "Type", type: "select", options: [{ value: "DEBIT", label: "Debit" }, { value: "CREDIT", label: "Credit" }] },
         { name: "itemName", label: "Item name", type: "text", required: true },
         { name: "vendorPayee", label: "Vendor / payee", type: "text", required: true },

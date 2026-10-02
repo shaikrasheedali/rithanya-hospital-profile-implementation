@@ -150,18 +150,23 @@ if (frontendDir) {
 
 // ---------- Boot ----------
 async function boot() {
-  await ensureBaseData();
+  const server = app.listen(PORT, () => {
+    console.log(`[server] Rithanya Hospital API + frontend listening on http://localhost:${PORT}`);
+  });
+
+  try {
+    await ensureBaseData();
+    console.log("[server] Database base data verified.");
+  } catch (e) {
+    console.warn("[server] Notice: Could not connect to database on boot:", e instanceof Error ? e.message : e);
+  }
+
   // Retention purge on boot + every 24h (never touches EMR/vitals)
   runRetentionPurge().catch((e) => console.error(e));
   const timer = setInterval(() => runRetentionPurge().catch((e) => console.error(e)), 24 * 3600 * 1000);
   (timer as unknown as { unref?: () => void }).unref?.();
-
-  app.listen(PORT, () => {
-    console.log(`[server] Rithanya Hospital API + frontend listening on http://localhost:${PORT}`);
-  });
 }
 
 boot().catch((e) => {
-  console.error("[boot] failed", e);
-  process.exit(1);
+  console.error("[boot] unexpected error:", e);
 });

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { PageHeader, Card, EntityPicker } from "@/components/portal/ui";
-import { formatINR, formatDate } from "@/lib/utils";
+import { PageHeader, Card, EntityPicker, Empty } from "@/components/portal/ui";
+import { formatINR } from "@/lib/utils";
 import { usePortalData, LoadingCard, ErrorCard } from "./hooks";
 
 export default function FinanceOverviewPage() {
@@ -44,45 +44,53 @@ export default function FinanceOverviewPage() {
       </div>
       <Card className="mt-6 p-6">
         <h2 className="text-lg font-semibold">Monthly trend</h2>
-        <div className="mt-4 flex h-40 items-end gap-3">
-          {data.months.map((m) => (
-            <div key={m.month} className="flex-1 text-center">
-              <div
-                className="mx-auto w-8 rounded-t bg-royal"
-                style={{ height: Math.round((m.credit / max) * 120) + "px" }}
-                title={"Credit " + m.credit}
-              />
-              <div
-                className="mx-auto mt-1 w-8 rounded-t bg-alert/70"
-                style={{ height: Math.round((m.debit / max) * 120) + "px" }}
-                title={"Debit " + m.debit}
-              />
-              <p className="mt-2 text-xs">{m.month.slice(2)}</p>
-            </div>
-          ))}
-        </div>
+        {data.months.length === 0 ? (
+          <Empty text="No ledger entries recorded for this entity yet." />
+        ) : (
+          <div className="mt-4 flex h-40 items-end gap-3">
+            {data.months.map((m) => (
+              <div key={m.month} className="flex-1 text-center">
+                <div
+                  className="mx-auto w-8 rounded-t bg-royal"
+                  style={{ height: Math.round((m.credit / max) * 120) + "px" }}
+                  title={"Credit " + m.credit}
+                />
+                <div
+                  className="mx-auto mt-1 w-8 rounded-t bg-alert/70"
+                  style={{ height: Math.round((m.debit / max) * 120) + "px" }}
+                  title={"Debit " + m.debit}
+                />
+                <p className="mt-2 text-xs">{m.month.slice(2)}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
       <Card className="mt-6 p-6">
         <h2 className="text-lg font-semibold">Spend by category</h2>
-        {data.byCategory.map((c) => (
-          <div key={c.name} className="mt-3">
-            <div className="flex justify-between text-base">
-              <span>{c.name}</span>
-              <strong>{formatINR(c.total)}</strong>
+        {data.byCategory.length === 0 ? (
+          <Empty text="No category expenses recorded for this entity yet." />
+        ) : (
+          data.byCategory.map((c) => (
+            <div key={c.name} className="mt-3">
+              <div className="flex justify-between text-base">
+                <span>{c.name}</span>
+                <strong>{formatINR(c.total)}</strong>
+              </div>
+              <div className="mt-1 h-2 rounded bg-line">
+                <div
+                  className="h-2 rounded bg-royal"
+                  style={{
+                    width:
+                      Math.round(
+                        (c.total / Math.max(1, ...data.byCategory.map((x) => x.total))) * 100
+                      ) + "%",
+                  }}
+                />
+              </div>
             </div>
-            <div className="mt-1 h-2 rounded bg-line">
-              <div
-                className="h-2 rounded bg-royal"
-                style={{
-                  width:
-                    Math.round(
-                      (c.total / Math.max(1, ...data.byCategory.map((x) => x.total))) * 100
-                    ) + "%",
-                }}
-              />
-            </div>
-          </div>
-        ))}
+          ))
+        )}
       </Card>
     </>
   );

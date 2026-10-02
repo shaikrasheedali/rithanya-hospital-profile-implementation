@@ -3,10 +3,10 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "mysql"
 }
 
-// ---------- Enums are stored as plain Strings on SQLite ----------
+// ---------- Enums are stored as plain Strings ----------
 // Role: SUPERADMIN | ADMIN | STAFF
 // Gender: MALE | FEMALE | OTHER
 // PatientType: INPATIENT | OUTPATIENT
@@ -57,7 +57,7 @@ model UserModuleAccess {
 model ClinicalCategory {
   id          String    @id @default(uuid())
   name        String    @unique @map("name")
-  description String?   @map("description")
+  description String?   @db.Text @map("description")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
   patients    Patient[]
@@ -74,9 +74,9 @@ model Patient {
   gender            String    @map("gender")
   bloodGroup        String    @map("blood_group")
   patientType       String    @map("patient_type")
-  clinicalCondition String    @default("") @map("clinical_condition")
-  allergies         String    @default("") @map("allergies")
-  consentPhotoUrl   String?   @map("consent_photo_url")
+  clinicalCondition String    @default("") @db.Text @map("clinical_condition")
+  allergies         String    @default("") @db.Text @map("allergies")
+  consentPhotoUrl   String?   @db.Text @map("consent_photo_url")
   categoryId        String?   @map("category_id")
   category          ClinicalCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   isDischarged      Boolean   @default(false) @map("is_discharged")
@@ -89,6 +89,7 @@ model Patient {
   @@map("patients")
   @@index([patientType])
   @@index([isDischarged])
+  @@index([categoryId])
 }
 
 model InpatientStay {
@@ -99,7 +100,7 @@ model InpatientStay {
   admissionDate  DateTime  @default(now()) @map("admission_date")
   dischargeDate  DateTime? @map("discharge_date")
   status         String    @default("ADMITTED") @map("status")
-  dischargeNotes String?   @map("discharge_notes")
+  dischargeNotes String?   @db.Text @map("discharge_notes")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -121,7 +122,7 @@ model VitalLog {
   bpSystolic          Int      @map("bp_systolic")
   bpDiastolic         Int      @map("bp_diastolic")
   serumFerritin       Float?   @map("serum_ferritin")
-  clinicalNotes       String?  @map("clinical_notes")
+  clinicalNotes       String?  @db.Text @map("clinical_notes")
   recordedByStaff     String?  @map("recorded_by_staff")
 
   @@map("vital_logs")
@@ -147,7 +148,7 @@ model MediaAsset {
   mimeType    String      @default("image/webp") @map("mime_type")
   kind        String      @default("IMAGE") @map("kind")
   sizeInBytes Int         @map("size_in_bytes")
-  url         String      @map("url")
+  url         String      @db.Text @map("url")
   createdAt   DateTime    @default(now()) @map("created_at")
   links       MediaLink[]
 
@@ -172,8 +173,8 @@ model Specialty {
   id           String   @id @default(uuid())
   title        String   @map("title")
   slug         String   @unique @map("slug")
-  shortSummary String   @map("short_summary")
-  contentHtml  String   @default("") @map("content_html")
+  shortSummary String   @db.Text @map("short_summary")
+  contentHtml  String   @default("") @db.Text @map("content_html")
   sortOrder    Int      @default(0) @map("sort_order")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
@@ -187,8 +188,8 @@ model Treatment {
   slug         String   @unique @map("slug")
   category     String   @default("General") @map("category")
   isFlagship   Boolean  @default(false) @map("is_flagship")
-  shortSummary String   @map("short_summary")
-  contentHtml  String   @default("") @map("content_html")
+  shortSummary String   @db.Text @map("short_summary")
+  contentHtml  String   @default("") @db.Text @map("content_html")
   sortOrder    Int      @default(0) @map("sort_order")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
@@ -201,8 +202,8 @@ model Service {
   title        String   @map("title")
   slug         String   @unique @map("slug")
   category     String   @default("Outpatient") @map("category")
-  shortSummary String   @map("short_summary")
-  contentHtml  String   @default("") @map("content_html")
+  shortSummary String   @db.Text @map("short_summary")
+  contentHtml  String   @default("") @db.Text @map("content_html")
   sortOrder    Int      @default(0) @map("sort_order")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
@@ -214,12 +215,12 @@ model Doctor {
   id                 String   @id @default(uuid())
   fullName           String   @map("full_name")
   slug               String   @unique @map("slug")
-  qualifications     String   @map("qualifications")
+  qualifications     String   @db.Text @map("qualifications")
   designation        String   @map("designation")
   department         String   @map("department")
   consultationTimings String  @default("") @map("consultation_timings")
   isVisiting         Boolean  @default(false) @map("is_visiting")
-  biographyHtml      String   @default("") @map("biography_html")
+  biographyHtml      String   @default("") @db.Text @map("biography_html")
   experienceYears    Int      @default(0) @map("experience_years")
   sortOrder          Int      @default(0) @map("sort_order")
   createdAt          DateTime @default(now()) @map("created_at")
@@ -232,7 +233,7 @@ model InsuranceProvider {
   id              String   @id @default(uuid())
   name            String   @map("name")
   schemeType      String   @map("scheme_type")
-  descriptionHtml String   @default("") @map("description_html")
+  descriptionHtml String   @default("") @db.Text @map("description_html")
   sortOrder       Int      @default(0) @map("sort_order")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
@@ -244,8 +245,8 @@ model GalleryItem {
   id         String   @id @default(uuid())
   title      String   @map("title")
   mediaType  String   @default("IMAGE") @map("media_type")
-  embedCode  String   @default("") @map("embed_code")
-  caption    String   @default("") @map("caption")
+  embedCode  String   @default("") @db.Text @map("embed_code")
+  caption    String   @default("") @db.Text @map("caption")
   sortOrder  Int      @default(0) @map("sort_order")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
@@ -259,8 +260,8 @@ model BlogPost {
   slug        String   @unique @map("slug")
   authorName  String   @default("Rithanya Medical Editorial") @map("author_name")
   category    String   @default("Diabetes Management") @map("category")
-  excerpt     String   @map("excerpt")
-  contentHtml String   @default("") @map("content_html")
+  excerpt     String   @db.Text @map("excerpt")
+  contentHtml String   @default("") @db.Text @map("content_html")
   isPublished Boolean  @default(true) @map("is_published")
   publishedAt DateTime @default(now()) @map("published_at")
   sortOrder   Int      @default(0) @map("sort_order")
@@ -275,7 +276,7 @@ model Testimonial {
   location    String   @default("Khammam") @map("location")
   treatment   String   @default("") @map("treatment")
   rating      Int      @default(5) @map("rating")
-  quote       String   @map("quote")
+  quote       String   @db.Text @map("quote")
   sortOrder   Int      @default(0) @map("sort_order")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
@@ -288,7 +289,7 @@ model Product {
   name              String      @map("name")
   slug              String      @unique @map("slug")
   category          String      @default("Wellness") @map("category")
-  description       String      @default("") @map("description")
+  description       String      @default("") @db.Text @map("description")
   price             Float       @map("price")
   stockUnits        Int         @default(0) @map("stock_units")
   isPrescriptionReq Boolean     @default(false) @map("is_prescription_req")
@@ -305,7 +306,7 @@ model Order {
   orderNumber     String      @unique @map("order_number")
   customerName    String      @map("customer_name")
   phoneNumber     String      @map("phone_number")
-  shippingAddress String      @map("shipping_address")
+  shippingAddress String      @db.Text @map("shipping_address")
   pinCode         String      @default("") @map("pin_code")
   totalAmount     Float       @map("total_amount")
   status          String      @default("PENDING") @map("status")
@@ -330,6 +331,8 @@ model OrderItem {
   unitPrice   Float   @map("unit_price")
 
   @@map("order_items")
+  @@index([orderId])
+  @@index([productId])
 }
 
 model Employee {
@@ -364,7 +367,7 @@ model PayrollRecord {
   allowances       Float     @default(0) @map("allowances")
   otherDeductions  Float     @default(0) @map("other_deductions")
   netPayable       Float     @map("net_payable")
-  authorizerSignSvg String?  @map("authorizer_sign_svg")
+  authorizerSignSvg String?  @db.MediumText @map("authorizer_sign_svg")
   authorizerName   String?   @map("authorizer_name")
   signedAt         DateTime? @map("signed_at")
   createdAt        DateTime  @default(now()) @map("created_at")
@@ -372,13 +375,14 @@ model PayrollRecord {
 
   @@map("payroll_records")
   @@unique([employeeId, month, year])
+  @@index([employeeId])
 }
 
 model ExpenseCategory {
   id          String         @id @default(uuid())
   entity      String         @default("RITHANYA_HOSPITAL") @map("entity")
   name        String         @map("name")
-  description String?        @map("description")
+  description String?        @db.Text @map("description")
   createdAt   DateTime       @default(now()) @map("created_at")
   entries     ExpenseLedger[]
 
@@ -392,7 +396,7 @@ model ExpenseLedger {
   entity      String           @default("RITHANYA_HOSPITAL") @map("entity")
   type        String           @map("type")
   itemName    String           @map("item_name")
-  description String?          @map("description")
+  description String?          @db.Text @map("description")
   categoryId  String?          @map("category_id")
   category    ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   vendorPayee String           @map("vendor_payee")
@@ -405,6 +409,7 @@ model ExpenseLedger {
   @@map("expense_ledger")
   @@index([entity])
   @@index([entryDate])
+  @@index([categoryId])
 }
 
 model DpdpErasureRequest {
@@ -413,11 +418,11 @@ model DpdpErasureRequest {
   fullName          String   @map("full_name")
   phoneNumber       String   @map("phone_number")
   identificationRef String?  @map("identification_ref")
-  recordsNature     String   @default("") @map("records_nature")
-  requestDetails    String   @map("request_details")
-  identityProofFile String?  @map("identity_proof_file")
+  recordsNature     String   @default("") @db.Text @map("records_nature")
+  requestDetails    String   @db.Text @map("request_details")
+  identityProofFile String?  @db.Text @map("identity_proof_file")
   status            String   @default("PENDING") @map("status")
-  resolutionNotes   String?  @map("resolution_notes")
+  resolutionNotes   String?  @db.Text @map("resolution_notes")
   matchedPatientId  String?  @map("matched_patient_id")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
@@ -431,7 +436,7 @@ model Appointment {
   phone         String   @map("phone")
   department    String   @default("") @map("department")
   preferredDate String   @default("") @map("preferred_date")
-  message       String   @default("") @map("message")
+  message       String   @default("") @db.Text @map("message")
   source        String   @default("WEBSITE") @map("source")
   status        String   @default("NEW") @map("status")
   createdAt     DateTime @default(now()) @map("created_at")
@@ -448,12 +453,12 @@ model HospitalSetting {
   whatsappNumber              String   @default("918328581019") @map("whatsapp_number")
   email                       String   @default("care@rithanyahospital.com") @map("email")
   criticalBloodAlertThreshold Int      @default(3) @map("critical_blood_alert_threshold")
-  physicalAddress             String   @default("") @map("physical_address")
+  physicalAddress             String   @default("") @db.Text @map("physical_address")
   opdTimings                  String   @default("Open 24 Hours | Daycare & OPD: 9:00 AM - 8:00 PM") @map("opd_timings")
-  noticeBanner                String   @default("") @map("notice_banner")
+  noticeBanner                String   @default("") @db.Text @map("notice_banner")
   seoPageTitle                String   @default("") @map("seo_page_title")
-  metaDescription             String   @default("") @map("meta_description")
-  targetKeywords              String   @default("") @map("target_keywords")
+  metaDescription             String   @default("") @db.Text @map("meta_description")
+  targetKeywords              String   @default("") @db.Text @map("target_keywords")
   canonicalUrl                String   @default("https://rithanyahospital.com") @map("canonical_url")
   robotsIndexFollow           Boolean  @default(true) @map("robots_index_follow")
   faviconUrl                  String?  @map("favicon_url")
@@ -468,7 +473,7 @@ model AuditLog {
   action    String   @map("action")
   entity    String   @map("entity")
   entityId  String?  @map("entity_id")
-  details   String?  @map("details")
+  details   String?  @db.Text @map("details")
   userId    String?  @map("user_id")
   user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   userName  String?  @map("user_name")
@@ -476,4 +481,5 @@ model AuditLog {
 
   @@map("audit_logs")
   @@index([timestamp])
+  @@index([userId])
 }

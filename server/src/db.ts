@@ -1,40 +1,31 @@
-import path from "node:path";
-import fs from "node:fs";
 import { PrismaClient } from "@prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 
-function adapterUrl(): string {
-  const raw = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
-  if (!raw.startsWith("file:")) return raw;
-  const p = raw.slice("file:".length);
-  if (path.isAbsolute(p)) return raw;
-  // better-sqlite3 resolves relative paths against process.cwd().
-  // Normalise to the server directory so dev (tsx) and prod (dist/) share one file,
-  // whether launched from monorepo root or server directory.
-  const serverDir = process.cwd().endsWith("dist") || path.basename(process.cwd()) === "src"
-    ? path.resolve(process.cwd(), "..")
-    : process.cwd();
+export function getDbConfig() {
+  const host = process.env.DB_HOST || "localhost";
+  const port = Number(process.env.DB_PORT || "3306");
+  const user = process.env.DB_USER || "root";
+  const password = process.env.DB_PASSWORD || "";
+  const database = process.env.DB_NAME || "rithanya";
 
-  const candidates = [
-    path.join(serverDir, p),
-    path.join(serverDir, "server", p),
-    path.resolve(__dirname, "..", p),
-    path.resolve(__dirname, "../..", p),
-  ];
-
-  for (const c of candidates) {
-    if (fs.existsSync(c)) {
-      return `file:${c}`;
-    }
+  if (!process.env.DATABASE_URL || process.env.DATABASE_URL.startsWith("file:")) {
+    const encUser = encodeURIComponent(user);
+    const encPw = encodeURIComponent(password);
+    process.env.DATABASE_URL = `mysql://${encUser}:${encPw}@${host}:${port}/${database}`;
   }
 
-  const defaultDir = fs.existsSync(path.join(serverDir, "server")) ? path.join(serverDir, "server") : serverDir;
-  const pr = path.join(defaultDir, p);
-  return `file:${pr}`;
+  return { host, port, user, password, database };
 }
 
 function createClient(): PrismaClient {
-  const adapter = new PrismaBetterSqlite3({ url: adapterUrl() });
+  const config = getDbConfig();
+  const adapter = new PrismaMariaDb({
+    host: config.host,
+    port: config.port,
+    user: config.user,
+    password: config.password,
+    database: config.database,
+  });
   return new PrismaClient({ adapter });
 }
 

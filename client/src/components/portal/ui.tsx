@@ -9,9 +9,18 @@ export async function api<T = unknown>(
   body?: unknown,
 ): Promise<{ ok: boolean; data?: T; error?: string }> {
   try {
+    const entityMatch = typeof document !== "undefined" ? document.cookie.match(/(?:^|; )rh_entity=([^;]*)/) : null;
+    const entity = entityMatch ? entityMatch[1] : "RITHANYA_HOSPITAL";
+    const headers: Record<string, string> = {
+      "x-rh-entity": entity,
+    };
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
     const res = await fetch(url, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      headers,
+      credentials: "same-origin",
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     const json = await res.json().catch(() => ({}));

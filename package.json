@@ -2,7 +2,7 @@
   "name": "rithanya-full-stack",
   "version": "1.0.0",
   "private": true,
-  "description": "Rithanya Hospital — monorepo (React 19.3 Vite client + Express + Prisma SQLite server). Backend serves built frontend.",
+  "description": "Rithanya Hospital — monorepo (React 19.3 Vite client + Express + Prisma MySQL server). Backend serves built frontend.",
   "workspaces": [
     "client",
     "server"
@@ -15,7 +15,7 @@
     "build:client": "npm --prefix client run build",
     "build:server": "npm --prefix server run build",
     "prestart": "npm --prefix server run prisma:generate",
-    "start": "npm --prefix server run start",
+    "start": "node index.js",
     "prisma:generate": "npm --prefix server run prisma:generate",
     "db:migrate": "npm --prefix server run db:migrate",
     "db:seed": "npm --prefix server run db:seed",
@@ -27,5 +27,12 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.10.0",
+    "mysql2": "^3.24.5"
+  },
+  "devDependencies": {
+    "prisma": "^7.10.0"
   }
 }

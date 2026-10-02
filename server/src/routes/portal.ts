@@ -176,14 +176,15 @@ async function runHandler(req: import("express").Request, res: import("express")
     res.status(403).json({ error: "You do not have access to this module" });
     return;
   }
+  const entity = getEntity(req);
   try {
     let result: unknown;
     if (kind === "create") {
       if (!handler.create) throw new ApiError("Not supported", 405);
-      result = await handler.create({ user, body: req.body ?? {} });
+      result = await handler.create({ user, body: req.body ?? {}, entity });
     } else if (kind === "update") {
       if (!handler.update) throw new ApiError("Not supported", 405);
-      result = await handler.update({ user, body: req.body ?? {}, id });
+      result = await handler.update({ user, body: req.body ?? {}, id, entity });
     } else if (kind === "remove") {
       if (!handler.remove) throw new ApiError("Not supported", 405);
       result = await handler.remove({ user, body: req.body ?? {}, id });

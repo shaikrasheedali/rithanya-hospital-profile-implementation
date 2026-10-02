@@ -1,9 +1,7 @@
 "use client";
 import { Link, useLocation } from "react-router-dom";
-
-
 import { useEffect, useState } from "react";
-import { ChevronDown, HeartPulse, LogIn, Menu, Phone, ShoppingBag, X } from "lucide-react";
+import { ChevronDown, LogIn, Menu, Phone, ShoppingBag, X } from "lucide-react";
 import { LanguagePicker } from "@/components/site/LanguagePicker";
 import { useCart } from "@/components/site/CartProvider";
 import { telHref } from "@/lib/utils";
@@ -58,25 +56,30 @@ export function Navbar({ brand, phone }: { brand: string; phone: string }) {
     : "text-[#333333] hover:text-[#0D47A1]";
 
   return (
-    <header className={`fixed inset-x-0 top-0 z-50 transition-colors ${solid ? "bg-navy shadow-lg shadow-navy/20 on-dark" : "bg-white/85 shadow-sm backdrop-blur-md"}`}>
-      <nav className={`mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 transition-all sm:px-6 lg:px-8 xl:px-6 ${solid ? "py-3" : "py-4"}`} aria-label="Primary">
-        <Link to="/" className="flex flex-none items-center gap-2.5" aria-label={`${brand} — home`}>
+    <header className={`fixed inset-x-0 top-0 z-50 transition-colors ${solid ? "bg-navy shadow-lg shadow-navy/20 on-dark" : "bg-white/90 shadow-sm backdrop-blur-md"}`}>
+      <nav className={`w-full flex items-center justify-between gap-4 px-4 sm:px-6 md:px-8 lg:px-10 xl:px-12 2xl:px-16 transition-all ${solid ? "py-3" : "py-3.5"}`} aria-label="Primary">
+        <Link to="/" className="flex flex-none items-center gap-3" aria-label={`${brand} — home`}>
           <img
             src="/logo.png"
             alt={`${brand} logo`}
             className="h-10 w-10 flex-none object-contain drop-shadow-sm transition-transform hover:scale-105"
           />
-          <span className={`whitespace-nowrap text-xl font-semibold transition-colors ${solid ? "text-white" : "text-[#0A2540]"}`} style={{ fontFamily: "var(--font-heading)" }}>
+          <span className={`whitespace-nowrap text-xl font-bold tracking-tight transition-colors ${solid ? "text-white" : "text-[#0A2540]"}`} style={{ fontFamily: "var(--font-heading)" }}>
             {brand}
           </span>
         </Link>
 
-        <ul className="hidden items-center gap-3 xl:flex">
+        <ul className="hidden items-center gap-1.5 lg:gap-2 xl:gap-3 2xl:gap-4 xl:flex">
           {NAV.map((item) => (
             <li key={item.label} className="group relative">
-              <Link to={item.href} className={`flex items-center gap-1 whitespace-nowrap py-2 text-sm font-medium transition-colors 2xl:text-base ${linkCls}`}>
+              <Link
+                to={item.href}
+                className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-all 2xl:px-3.5 2xl:text-[15px] ${linkCls} ${
+                  solid ? "hover:bg-white/10" : "hover:bg-black/5"
+                }`}
+              >
                 {item.label}
-                {item.children && <ChevronDown className="h-4 w-4 transition-transform group-hover:rotate-180" />}
+                {item.children && <ChevronDown className="h-4 w-4 opacity-70 transition-transform group-hover:rotate-180" />}
               </Link>
               {item.children && (
                 <div className="invisible absolute left-1/2 top-full z-10 w-64 -translate-x-1/2 translate-y-2 pt-3 opacity-0 transition-all group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
@@ -94,35 +97,51 @@ export function Navbar({ brand, phone }: { brand: string; phone: string }) {
             </li>
           ))}
           <li>
-            <a href={telHref(phone)} className={`flex items-center gap-1.5 whitespace-nowrap py-2 text-sm font-semibold transition-colors 2xl:text-base ${solid ? "text-[#ff8a80] hover:text-white" : "text-[#D32F2F] hover:text-[#0A2540]"}`}>
+            <a
+              href={telHref(phone)}
+              className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-semibold transition-all 2xl:px-4 2xl:text-[15px] ${
+                solid
+                  ? "text-[#ff8a80] hover:bg-white/10 hover:text-white"
+                  : "text-[#D32F2F] hover:bg-red-50 hover:text-red-700"
+              }`}
+            >
               <Phone className="h-4 w-4" /> Emergency
             </a>
           </li>
         </ul>
 
-        <div className="flex flex-none items-center gap-1.5 sm:gap-2">
+        <div className="flex flex-none items-center gap-2.5 sm:gap-3 lg:gap-4">
           <div className="hidden md:block">
             <LanguagePicker dark={solid} />
           </div>
           <button
             onClick={openCart}
             aria-label={`Open cart, ${count} item${count === 1 ? "" : "s"}`}
-            className={`relative rounded-full p-2.5 ${solid ? "text-white hover:bg-white/10" : "text-[#0A2540] hover:bg-black/5"}`}
+            className={`relative rounded-full p-2.5 transition-all ${
+              solid ? "text-white hover:bg-white/10" : "text-[#0A2540] hover:bg-black/5"
+            }`}
           >
             <ShoppingBag className="h-6 w-6" />
             {count > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#D32F2F] px-1 text-xs font-bold text-white">{count}</span>
+              <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#D32F2F] px-1 text-xs font-bold text-white shadow-sm">
+                {count}
+              </span>
             )}
           </button>
-          <Link to="/portal/login"
-            className={`hidden items-center gap-2 whitespace-nowrap rounded-full border px-3 py-2 text-sm font-semibold xl:flex 2xl:px-4 ${
-              solid ? "border-white/30 text-white hover:border-gold hover:text-gold" : "border-[#0A2540]/30 text-[#0A2540] hover:border-[#0D47A1] hover:text-[#0D47A1]"
+          <Link
+            to="/portal/login"
+            className={`hidden items-center gap-2 whitespace-nowrap rounded-full border px-4 py-2 text-sm font-semibold shadow-sm transition-all xl:flex 2xl:px-5 ${
+              solid
+                ? "border-white/30 text-white hover:border-gold hover:text-gold hover:bg-white/5"
+                : "border-[#0A2540]/30 text-[#0A2540] hover:border-[#0D47A1] hover:text-[#0D47A1] hover:bg-[#0D47A1]/5"
             }`}
           >
             <LogIn className="h-4 w-4" /> Staff Login
           </Link>
           <button
-            className={`rounded-full p-2.5 xl:hidden ${solid ? "text-white hover:bg-white/10" : "text-[#0A2540] hover:bg-black/5"}`}
+            className={`rounded-full p-2.5 transition-all xl:hidden ${
+              solid ? "text-white hover:bg-white/10" : "text-[#0A2540] hover:bg-black/5"
+            }`}
             onClick={() => setOpen((v) => !v)}
             aria-label={open ? "Close menu" : "Open menu"}
             aria-expanded={open}

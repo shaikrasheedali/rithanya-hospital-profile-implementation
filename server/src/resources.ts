@@ -16,7 +16,7 @@ export class ApiError extends Error {
   }
 }
 
-export type Ctx = { user: SessionUser; body: Record<string, any>; id?: string };
+export type Ctx = { user: SessionUser; body: Record<string, any>; id?: string; entity?: string };
 type Fn = (c: Ctx) => Promise<unknown>;
 export type Handler = {
   module: ModuleKey;
@@ -279,9 +279,9 @@ const orders: Handler = {
   },
 };
 
-function employeeValues(b: Record<string, any>) {
+function employeeValues(b: Record<string, any>, defaultEntity?: string) {
   return {
-    entity: oneOf(b.entity ?? "RITHANYA_HOSPITAL", ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity"),
+    entity: oneOf(b.entity ?? defaultEntity ?? "RITHANYA_HOSPITAL", ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity"),
     fullName: req(b.fullName, "Full name", 120, 2),
     designation: req(b.designation, "Designation", 120),
     department: req(b.department, "Department", 120),
@@ -294,13 +294,13 @@ function employeeValues(b: Record<string, any>) {
 
 const employees: Handler = {
   module: "hr",
-  async create({ user, body }) {
-    const row = await prisma.employee.create({ data: employeeValues(body) as never });
+  async create({ user, body, entity }) {
+    const row = await prisma.employee.create({ data: employeeValues(body, entity) as never });
     await audit(user, "CREATE_EMPLOYEE", "Employee", row.id, row.fullName);
     return row;
   },
-  async update({ user, body, id }) {
-    const row = await prisma.employee.update({ where: { id: id! }, data: employeeValues(body) as never });
+  async update({ user, body, id, entity }) {
+    const row = await prisma.employee.update({ where: { id: id! }, data: employeeValues(body, entity) as never });
     await audit(user, "UPDATE_EMPLOYEE", "Employee", id, row?.fullName);
     return row;
   },
@@ -384,25 +384,25 @@ const payroll: Handler = {
 
 const expenseCategories: Handler = {
   module: "finance",
-  async create({ user, body }) {
+  async create({ user, body, entity }) {
     try {
-      const entity = oneOf(body.entity ?? "RITHANYA_HOSPITAL", ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity");
+      const ent = oneOf(body.entity ?? entity ?? "RITHANYA_HOSPITAL", ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity");
       const row = await prisma.expenseCategory.create({
-        data: { entity, name: req(body.name, "Category name", 120), description: str(body.description, 400) || null },
+        data: { entity: ent, name: req(body.name, "Category name", 120), description: str(body.description, 400) || null },
       });
-      await audit(user, "CREATE_EXPENSE_CATEGORY", "ExpenseCategory", row.id, `${row.name} (${entity})`);
+      await audit(user, "CREATE_EXPENSE_CATEGORY", "ExpenseCategory", row.id, `${row.name} (${ent})`);
       return row;
     } catch (e) {
       if (uniqueViolation(e)) throw new ApiError("Category already exists", 409);
       throw e;
     }
   },
-  async update({ user, body, id }) {
+  async update({ user, body, id, entity }) {
     const data: Record<string, any> = {
       name: req(body.name, "Category name", 120),
       description: str(body.description, 400) || null,
     };
-    if (body.entity) data.entity = oneOf(body.entity, ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity");
+    if (body.entity || entity) data.entity = oneOf(body.entity ?? entity, ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity");
     const row = await prisma.expenseCategory.update({
       where: { id: id! },
       data,
@@ -417,9 +417,9 @@ const expenseCategories: Handler = {
   },
 };
 
-function ledgerValues(b: Record<string, any>) {
+function ledgerValues(b: Record<string, any>, defaultEntity?: string) {
   return {
-    entity: oneOf(b.entity ?? "RITHANYA_HOSPITAL", ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity"),
+    entity: oneOf(b.entity ?? defaultEntity ?? "RITHANYA_HOSPITAL", ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity"),
     type: oneOf(b.type, ["CREDIT", "DEBIT"] as const, "type"),
     itemName: req(b.itemName, "Item name", 200),
     description: str(b.description, 1000) || null,
@@ -434,13 +434,13 @@ function ledgerValues(b: Record<string, any>) {
 
 const ledger: Handler = {
   module: "finance",
-  async create({ user, body }) {
-    const row = await prisma.expenseLedger.create({ data: ledgerValues(body) as never });
+  async create({ user, body, entity }) {
+    const row = await prisma.expenseLedger.create({ data: ledgerValues(body, entity) as never });
     await audit(user, "LEDGER_ENTRY", "ExpenseLedger", row.id, `${row.type} ${row.amount} ${row.itemName}`);
     return row;
   },
-  async update({ user, body, id }) {
-    const row = await prisma.expenseLedger.update({ where: { id: id! }, data: ledgerValues(body) as never });
+  async update({ user, body, id, entity }) {
+    const row = await prisma.expenseLedger.update({ where: { id: id! }, data: ledgerValues(body, entity) as never });
     await audit(user, "LEDGER_UPDATE", "ExpenseLedger", id);
     return row;
   },

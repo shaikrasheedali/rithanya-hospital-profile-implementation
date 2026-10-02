@@ -86,7 +86,7 @@ export function CrudManager({
 
   async function save() {
     setBusy(true);
-    const body: Record<string, unknown> = { ...v };
+    const body: Record<string, unknown> = { ...defaults, ...v };
     for (const f of fields) if (f.type === "password" && !body[f.name]) delete body[f.name];
     const r = editing === "new" ? await api(`/api/portal/r/${resource}`, "POST", body) : await api(`/api/portal/r/${resource}/${(editing as Row).id}`, "PUT", body);
     setBusy(false);

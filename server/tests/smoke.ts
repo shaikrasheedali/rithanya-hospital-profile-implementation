@@ -1,4 +1,4 @@
-/* Smoke tests: health, public reads, auth guard, validation. Run with `npm test` (server must be able to reach SQLite; does not require HTTP server). */
+/* Smoke tests: health, public reads, auth guard, validation. Run with `npm test` (server must be able to reach MySQL; does not require HTTP server). */
 import assert from "node:assert";
 import { prisma } from "../src/db.js";
 import { ensureSeed } from "../src/seed.js";
