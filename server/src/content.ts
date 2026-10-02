@@ -100,5 +100,12 @@ export async function getProducts() {
 export async function getBloodStock() {
   const rows = await prisma.bloodStock.findMany();
   const order = ["O", "A", "B", "AB"];
-  return rows.sort((a, b) => order.indexOf(a.groupCategory) - order.indexOf(b.groupCategory));
+  return (rows as Array<{ groupCategory?: string | null }>).sort((a: any, b: any) => {
+    const aCat = typeof a?.groupCategory === "string" ? a.groupCategory : "";
+    const bCat = typeof b?.groupCategory === "string" ? b.groupCategory : "";
+    const aIdx = order.indexOf(aCat);
+    const bIdx = order.indexOf(bCat);
+    return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
+  });
 }
+
