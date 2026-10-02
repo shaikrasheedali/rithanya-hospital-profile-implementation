@@ -11,6 +11,7 @@ import cookieParser from "cookie-parser";
 import publicRoutes from "../src/routes/public.js";
 import authRoutes from "../src/routes/auth.js";
 import portalRoutes from "../src/routes/portal.js";
+import mediaRoutes, { getSeedDir } from "../src/routes/media.js";
 
 async function runClientFlowTests() {
   console.log("=================================================");
@@ -23,6 +24,12 @@ async function runClientFlowTests() {
   app.use("/api/public", publicRoutes);
   app.use("/api/auth", authRoutes);
   app.use("/api/portal", portalRoutes);
+  app.use("/api/media", mediaRoutes);
+
+  const seedDir = getSeedDir();
+  if (seedDir) {
+    app.use("/seed", express.static(seedDir));
+  }
 
   // Serve static assets from public / client/dist
   const distDir = path.resolve(__dirname, "../../client/dist");
@@ -271,10 +278,15 @@ async function runClientFlowTests() {
     assert.strictEqual(resMedia.status, 200, "Portal media returned 200 (never 500)");
     const dataMedia: any = await resMedia.json();
     assert.ok(Array.isArray(dataMedia.assets), "Portal media assets is array");
-    console.log(`✓ Portal media API passed (${dataMedia.assets.length} assets returned)`);
+    // Verify none of the asset IDs have 'disk-0-' or 'disk-\d+-' prefix
+    for (const a of dataMedia.assets) {
+      assert.ok(!a.id.startsWith("disk-"), `Asset id '${a.id}' must be clean filename, not disk- prefixed`);
+    }
+    console.log(`✓ Portal media API passed (${dataMedia.assets.length} assets returned, all IDs clean)`);
 
-    // 11h. Update specialty spec-1 via CMS PUT (Testing user's exact issue scenario)
+    // 11h. Update specialty spec-1 via CMS PUT (Testing user's exact issue scenario: saving an item with a disk-prefixed or clean image)
     console.log("\n[Test 11h] Testing CMS Item Update fetch('PUT /api/portal/cms/specialties/spec-1')...");
+    const testDiskAsset = "disk-0-1790865049238-e905f64ce7895904.webp";
     const resUpdateSpec = await fetch(`${BASE}/api/portal/cms/specialties/spec-1`, {
       method: "PUT",
       headers: {
@@ -286,13 +298,48 @@ async function runClientFlowTests() {
         shortSummary: "Comprehensive care for Type 1, Type 2 and gestational diabetes with HbA1c screening.",
         contentHtml: "<p>Updated diabetology content with new protocols.</p>",
         sortOrder: 0,
-        mediaIds: ["m-glucose-finger"],
+        mediaIds: [testDiskAsset],
       }),
     });
     assert.strictEqual(resUpdateSpec.status, 200, "CMS PUT /api/portal/cms/specialties/spec-1 returned 200 (not 404)");
     const dataUpdateSpec: any = await resUpdateSpec.json();
     assert.strictEqual(dataUpdateSpec.ok, true, "Response indicated ok: true");
-    console.log("✓ Updating spec-1 succeeded with status 200 (User 404 issue fixed!)");
+    console.log("✓ Updating spec-1 with disk asset succeeded with status 200");
+
+    // 11h-2: Verify media resolution for spec-1
+    console.log("[Test 11h-2] Testing media resolution of cover image on updated item...");
+    const resPublicSpecCheck = await fetch(`${BASE}/api/public/clinical?type=specialties`);
+    const dataPublicSpecCheck: any = await resPublicSpecCheck.json();
+    const updatedSpecItem = dataPublicSpecCheck.items.find((x: any) => x.id === "spec-1");
+    assert.ok(updatedSpecItem, "spec-1 must exist in public specialties");
+    assert.ok(Array.isArray(updatedSpecItem.media) && updatedSpecItem.media.length > 0, "spec-1 has media");
+    const coverMedia = updatedSpecItem.media[0];
+    console.log(`✓ Resolved cover media url: ${coverMedia.url}`);
+    assert.ok(!coverMedia.url.includes("disk-0-"), `Cover URL '${coverMedia.url}' must not include disk-0- prefix`);
+    assert.ok(coverMedia.url.includes("1790865049238-e905f64ce7895904.webp"), "Cover URL includes target filename");
+
+    // 11h-3: Direct GET request to legacy disk-prefixed URL (/api/media/disk-0-1790865049238-e905f64ce7895904.webp)
+    console.log("[Test 11h-3] Testing GET /api/media/disk-0-... returns HTTP 200 (fixes user's 404 error)...");
+    const resDiskPrefixed = await fetch(`${BASE}/api/media/${testDiskAsset}`);
+    assert.strictEqual(resDiskPrefixed.status, 200, "GET disk-0- prefixed image URL returned 200 OK (NOT 404)");
+    assert.strictEqual(resDiskPrefixed.headers.get("content-type"), "image/webp", "Content-Type is image/webp");
+    const diskBuf = await resDiskPrefixed.arrayBuffer();
+    assert.ok(diskBuf.byteLength > 1000, `Image content served (${diskBuf.byteLength} bytes)`);
+    console.log(`✓ Direct fetch of /api/media/${testDiskAsset} passed with 200 OK (${diskBuf.byteLength} bytes)`);
+
+    // 11h-4: Direct GET request to clean URL (/api/media/1790865049238-e905f64ce7895904.webp)
+    console.log("[Test 11h-4] Testing GET /api/media/1790865049238-e905f64ce7895904.webp...");
+    const resCleanMedia = await fetch(`${BASE}/api/media/1790865049238-e905f64ce7895904.webp`);
+    assert.strictEqual(resCleanMedia.status, 200, "Clean media URL returned 200 OK");
+    console.log("✓ Direct fetch of clean media URL returned 200 OK");
+
+    // 11h-5: Direct GET request to seed media fallback (/api/media/disk-0-blood-bag.webp and /seed/blood-bag.webp)
+    console.log("[Test 11h-5] Testing seed asset resolution & fallbacks...");
+    const resSeedPrefixed = await fetch(`${BASE}/api/media/disk-0-blood-bag.webp`);
+    assert.strictEqual(resSeedPrefixed.status, 200, "Seed asset with disk-0- prefix returned 200 OK");
+    const resSeedDirect = await fetch(`${BASE}/seed/blood-bag.webp`);
+    assert.strictEqual(resSeedDirect.status, 200, "Static /seed/blood-bag.webp returned 200 OK");
+    console.log("✓ Seed assets & prefixed fallbacks passed with 200 OK");
 
     // 11i. Verify public API immediately reflects the updated spec-1 item
     console.log("[Test 11i] Testing Public Reflect for Updated Specialty...");

@@ -70,9 +70,10 @@ export function isDbOnCooldown(): boolean {
 }
 
 export function reportDbError(err?: unknown): void {
+  const wasOnCooldown = Date.now() < dbCooldownUntil;
   // Cooldown for 45 seconds to protect performance from hanging pool timeouts
   dbCooldownUntil = Date.now() + 45_000;
-  if (err) {
+  if (err && !wasOnCooldown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[db] Entered cooldown for 45s due to DB error: ${msg.slice(0, 160)}`);
   }

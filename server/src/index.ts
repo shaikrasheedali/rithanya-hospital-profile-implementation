@@ -12,6 +12,7 @@ import { runRetentionPurge } from "./retention.js";
 import authRoutes from "./routes/auth.js";
 import publicRoutes from "./routes/public.js";
 import portalRoutes from "./routes/portal.js";
+import mediaRoutes, { getSeedDir } from "./routes/media.js";
 import { IMAGE_DIR, VIDEO_DIR } from "./media.js";
 
 const app = express();
@@ -50,65 +51,12 @@ app.use("/api/portal/media", upload.array("files", 10));
 app.use("/api/portal", portalRoutes);
 
 // ---------- Public media files (uploaded images/videos) ----------
-app.get("/api/media/:filename", async (req, res) => {
-  const raw = req.params.filename;
-  const filename = path.basename(Array.isArray(raw) ? String(raw[0] ?? "") : String(raw ?? ""));
-  const ext = path.extname(filename).toLowerCase();
-  const dir = [".webp"].includes(ext) ? IMAGE_DIR : [".mp4", ".webm", ".mov", ".ogv"].includes(ext) ? VIDEO_DIR : null;
-  if (!dir) {
-    res.status(404).json({ error: "Not found" });
-    return;
-  }
-  const full = path.join(dir, filename);
-  if (!fs.existsSync(full)) {
-    res.status(404).json({ error: "Not found" });
-    return;
-  }
-  const stat = fs.statSync(full);
-  const mime = ext === ".webp" ? "image/webp" : ext === ".mp4" ? "video/mp4" : ext === ".webm" ? "video/webm" : ext === ".mov" ? "video/quicktime" : "video/ogg";
-  const range = req.headers.range;
-  res.setHeader("Accept-Ranges", "bytes");
-  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-  if (range) {
-    const m = /bytes=(\d*)-(\d*)/.exec(range);
-    if (!m) {
-      res.status(416).end();
-      return;
-    }
-    const start = m[1] ? Number(m[1]) : 0;
-    const end = m[2] ? Math.min(Number(m[2]), stat.size - 1) : stat.size - 1;
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= stat.size || end < start) {
-      res.status(416).setHeader("Content-Range", `bytes */${stat.size}`).end();
-      return;
-    }
-    res.status(206);
-    res.setHeader("Content-Range", `bytes ${start}-${end}/${stat.size}`);
-    res.setHeader("Content-Length", String(end - start + 1));
-    res.setHeader("Content-Type", mime);
-    fs.createReadStream(full, { start, end }).pipe(res);
-    return;
-  }
-  res.setHeader("Content-Type", mime);
-  res.setHeader("Content-Length", String(stat.size));
-  fs.createReadStream(full).pipe(res);
-});
+app.use("/api/media", mediaRoutes);
 
-// ---------- Seed / static assets (copied from original public/seed or generated placeholders) ----------
-const seedCandidates = [
-  path.join(process.cwd(), "public", "seed"),
-  path.join(process.cwd(), "server", "public", "seed"),
-  path.resolve(__dirname, "..", "public", "seed"),
-  path.resolve(__dirname, "../..", "public", "seed"),
-];
-let seedStaticDir: string | null = null;
-for (const s of seedCandidates) {
-  if (fs.existsSync(s)) {
-    seedStaticDir = s;
-    break;
-  }
-}
-if (seedStaticDir) {
-  app.use("/seed", express.static(seedStaticDir, { maxAge: "7d", immutable: false }));
+// ---------- Seed / static assets (seed assets with fallback) ----------
+const seedDir = getSeedDir();
+if (seedDir) {
+  app.use("/seed", express.static(seedDir, { maxAge: "7d", immutable: false }));
   // Missing seed assets are asset URLs, not app routes — 404 instead of SPA fallback.
   app.use("/seed", (_req, res) => {
     res.status(404).json({ error: "Not found" });

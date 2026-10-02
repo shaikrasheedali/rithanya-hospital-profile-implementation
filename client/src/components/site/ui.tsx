@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowUpRight, Play, Star } from "lucide-react";
 import { Reveal } from "@/components/Reveal";
 import { coverOf, type MediaRef } from "@/lib/utils";
@@ -13,16 +13,34 @@ export const IMG_FALLBACK =
 
 export function SafeImg({ src, alt = "", className = "" }: { src: string; alt?: string; className?: string }) {
   const [err, setErr] = useState(false);
+  const cleanSrc = (src || "")
+    .replace(/\/api\/media\/disk-\d+-/, "/api/media/")
+    .replace(/\/api\/media\/disk-/, "/api/media/")
+    .replace(/\/api\/media\/media-/, "/api/media/");
+
+  useEffect(() => {
+    setErr(false);
+  }, [cleanSrc]);
+
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={err ? IMG_FALLBACK : src} alt={alt} loading="lazy" className={className} onError={() => setErr(true)} />;
+  return <img src={err ? IMG_FALLBACK : cleanSrc} alt={alt} loading="lazy" className={className} onError={() => setErr(true)} />;
 }
 
 export function SafeVideo({ src, className = "", controls = false }: { src: string; className?: string; controls?: boolean }) {
   const [err, setErr] = useState(false);
+  const cleanSrc = (src || "")
+    .replace(/\/api\/media\/disk-\d+-/, "/api/media/")
+    .replace(/\/api\/media\/disk-/, "/api/media/")
+    .replace(/\/api\/media\/media-/, "/api/media/");
+
+  useEffect(() => {
+    setErr(false);
+  }, [cleanSrc]);
+
   if (err) return <SafeImg src={IMG_FALLBACK} alt="" className={className} />;
   return (
     <video
-      src={src}
+      src={cleanSrc}
       muted={!controls}
       playsInline
       preload="metadata"

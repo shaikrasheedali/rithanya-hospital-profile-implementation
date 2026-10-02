@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
 import { getSettings } from "./settings.js";
-import { IMAGE_DIR, inMemoryAssetStore } from "./media.js";
+import { IMAGE_DIR, inMemoryAssetStore, registerAssetInMemory } from "./media.js";
 
 export type AssetRow = {
   id: string;
@@ -33,7 +33,7 @@ export async function listAssets(): Promise<AssetRow[]> {
         const extra: string[] = [];
         if (s.faviconUrl === a.url) extra.push("favicon");
         if (s.socialShareThumbnailUrl === a.url) extra.push("og-image");
-        return {
+        const row: AssetRow = {
           id: a.id,
           filename: a.filename,
           originalName: a.originalName,
@@ -45,6 +45,8 @@ export async function listAssets(): Promise<AssetRow[]> {
           refs: a.links.length + extra.length,
           linkedTo: [...linkedTo, ...extra],
         };
+        registerAssetInMemory(row);
+        return row;
       });
     } catch (err) {
       reportDbError(err);
@@ -81,8 +83,8 @@ export async function listAssets(): Promise<AssetRow[]> {
         const url = `/api/media/${f}`;
         if (!seenUrls.has(url) && (f.endsWith(".webp") || f.endsWith(".png") || f.endsWith(".jpg"))) {
           seenUrls.add(url);
-          list.push({
-            id: `disk-${idx}-${f}`,
+          const assetRecord: AssetRow = {
+            id: f, // Clean filename as primary ID
             filename: f,
             originalName: f,
             mimeType: "image/webp",
@@ -92,7 +94,15 @@ export async function listAssets(): Promise<AssetRow[]> {
             createdAt: new Date(),
             refs: 0,
             linkedTo: [],
-          });
+          };
+          list.push(assetRecord);
+
+          // Register in memory under all possible identifiers for total resiliency
+          registerAssetInMemory(assetRecord);
+          inMemoryAssetStore.set(f, assetRecord);
+          inMemoryAssetStore.set(`disk-${idx}-${f}`, assetRecord);
+          inMemoryAssetStore.set(`disk-${f}`, assetRecord);
+          inMemoryAssetStore.set(`media-${f}`, assetRecord);
         }
       }
     }

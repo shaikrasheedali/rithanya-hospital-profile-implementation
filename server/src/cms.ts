@@ -103,10 +103,13 @@ async function findMany(key: CollectionKey) {
   }
 }
 
+const inFlightSyncs = new Set<string>();
+
 async function syncCollectionFromDb(key: CollectionKey) {
-  if (isDbOnCooldown()) return;
+  if (isDbOnCooldown() || inFlightSyncs.has(key)) return;
+  inFlightSyncs.add(key);
   try {
-    const rows = (await withDbTimeout(findMany(key), 2000)) as Array<Record<string, unknown> & { id: string }>;
+    const rows = (await withDbTimeout(findMany(key), 1500)) as Array<Record<string, unknown> & { id: string }>;
     if (rows && rows.length > 0) {
       const store = getCollectionStore(key);
       for (const row of rows) {
@@ -116,6 +119,8 @@ async function syncCollectionFromDb(key: CollectionKey) {
     }
   } catch (err) {
     reportDbError(err);
+  } finally {
+    inFlightSyncs.delete(key);
   }
 }
 
@@ -200,7 +205,10 @@ function uniqueSlugInMemory(key: CollectionKey, base: string): string {
 }
 
 function cleanMediaIds(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((x): x is string => typeof x === "string")
+    .map((id) => id.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, ""));
 }
 
 async function insertRow(key: CollectionKey, data: Record<string, unknown>) {

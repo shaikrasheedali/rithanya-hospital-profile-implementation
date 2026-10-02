@@ -54,7 +54,7 @@ router.post("/cms/:collection", requireAuth(), async (req, res) => {
     return;
   }
   await audit(user, `CREATE_${collection.toUpperCase()}`, collection, (result as { row: { id: string } }).row.id);
-  res.json({ ok: true });
+  res.json({ ok: true, item: (result as { row: unknown }).row });
 });
 
 router.put("/cms/:collection/:id", requireAuth(), async (req, res) => {
@@ -76,7 +76,7 @@ router.put("/cms/:collection/:id", requireAuth(), async (req, res) => {
     return;
   }
   await audit(user, `UPDATE_${collection.toUpperCase()}`, collection, id);
-  res.json({ ok: true });
+  res.json({ ok: true, item: (result as { row: unknown }).row });
 });
 
 router.delete("/cms/:collection/:id", requireAuth(), async (req, res) => {

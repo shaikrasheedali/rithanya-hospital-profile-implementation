@@ -64,7 +64,11 @@ export const inMemoryEntityMediaMap = new Map<string, string[]>();
 
 export function registerAssetInMemory(asset: MediaAssetRecord): void {
   inMemoryAssetStore.set(asset.id, asset);
-  if (asset.filename) inMemoryAssetStore.set(asset.filename, asset);
+  if (asset.filename) {
+    inMemoryAssetStore.set(asset.filename, asset);
+    const clean = asset.filename.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
+    inMemoryAssetStore.set(clean, asset);
+  }
 }
 
 export async function saveUploadFile(file: UploadedFile): Promise<MediaAssetRecord> {
@@ -177,12 +181,15 @@ export async function mediaMapFor(entityType: EntityType, ids: string[]): Promis
     if (mediaIds && mediaIds.length > 0) {
       const refs: MediaRef[] = [];
       for (const mId of mediaIds) {
-        const a = inMemoryAssetStore.get(mId);
+        const clean = mId.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
+        const a = inMemoryAssetStore.get(mId) || inMemoryAssetStore.get(clean);
         if (a) {
           refs.push({ id: a.id, url: a.url, kind: a.kind, originalName: a.originalName });
         } else {
-          // If referenced by path or id directly
-          refs.push({ id: mId, url: mId.startsWith("/") ? mId : `/api/media/${mId}`, kind: "IMAGE", originalName: mId });
+          // If clean is an uploaded file or seed path
+          const isVideo = clean.endsWith(".mp4") || clean.endsWith(".webm") || clean.endsWith(".mov");
+          const url = clean.startsWith("/") ? clean : `/api/media/${clean}`;
+          refs.push({ id: clean, url, kind: isVideo ? "VIDEO" : "IMAGE", originalName: clean });
         }
       }
       map.set(id, refs);
@@ -230,7 +237,8 @@ export async function withMedia<T extends { id: string }>(
 }
 
 export async function setEntityMedia(entityType: EntityType, entityId: string, mediaIds: string[]) {
-  const unique = Array.from(new Set(mediaIds));
+  const normalized = mediaIds.map((m) => m.replace(/^disk-\d+-/, "").replace(/^disk-/, ""));
+  const unique = Array.from(new Set(normalized));
   // Update in-memory mapping immediately
   inMemoryEntityMediaMap.set(`${entityType}:${entityId}`, unique);
 
