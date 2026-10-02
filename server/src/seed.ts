@@ -120,13 +120,30 @@ export async function ensureBaseData() {
     update: {},
   });
   const colors: Record<string, string> = { O: "SKY_BLUE", A: "YELLOW", B: "RED", AB: "WHITE" };
-  const seedStock: Record<string, [number, number]> = { O: [14, 9], A: [11, 7], B: [9, 6], AB: [4, 3] };
-  for (const g of ["O", "A", "B", "AB"]) {
-    await prisma.bloodStock.upsert({
-      where: { bloodGroup: g },
-      create: { bloodGroup: g, groupCategory: g, colorCode: colors[g], wholeBloodUnits: seedStock[g][0], plasmaUnits: seedStock[g][1] },
-      update: {},
-    });
+  const seedStock: Record<string, [number, number, string]> = {
+    "O+": [14, 9, "O"],
+    "O-": [8, 5, "O"],
+    "A+": [11, 7, "A"],
+    "A-": [6, 4, "A"],
+    "B+": [9, 6, "B"],
+    "B-": [5, 3, "B"],
+    "AB+": [4, 3, "AB"],
+    "AB-": [2, 2, "AB"],
+    "O": [14, 9, "O"],
+    "A": [11, 7, "A"],
+    "B": [9, 6, "B"],
+    "AB": [4, 3, "AB"],
+  };
+  for (const [g, [wb, pl, cat]] of Object.entries(seedStock)) {
+    try {
+      await prisma.bloodStock.upsert({
+        where: { bloodGroup: g },
+        create: { bloodGroup: g, groupCategory: cat, colorCode: colors[cat], wholeBloodUnits: wb, plasmaUnits: pl },
+        update: {},
+      });
+    } catch {
+      // ignore
+    }
   }
   void seedDirCandidate();
 }

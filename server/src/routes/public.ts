@@ -12,6 +12,8 @@ import {
   getClinicalBySlug,
   getDoctors,
   getDoctorBySlug,
+  getFacilities,
+  getFacilityBySlug,
   getFlagshipTreatments,
   getGallery,
   getInsurance,
@@ -30,6 +32,20 @@ const param = (v: unknown): string => (Array.isArray(v) ? String(v[0] ?? "") : S
 
 router.get("/settings", async (_req, res) => {
   res.json({ settings: await getSettings() });
+});
+
+router.get("/facilities", async (req, res) => {
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  res.json({ items: await getFacilities(limit) });
+});
+
+router.get("/facilities/:slug", async (req, res) => {
+  const item = await getFacilityBySlug(param(req.params.slug));
+  if (!item) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  res.json({ item });
 });
 
 router.get("/clinical", async (req, res) => {

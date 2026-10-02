@@ -3,6 +3,7 @@ import { COLLECTIONS, type CollectionKey, type FieldDef } from "./collections.js
 import { clearEntityMedia, setEntityMedia, withMedia, type EntityType } from "./media.js";
 import { sanitizeHtml, slugify } from "./utils.js";
 import {
+  FALLBACK_FACILITIES,
   FALLBACK_SPECIALTIES,
   FALLBACK_TREATMENTS,
   FALLBACK_SERVICES,
@@ -20,6 +21,7 @@ export function isCollection(key: string): key is CollectionKey {
 
 async function findMany(key: CollectionKey) {
   switch (key) {
+    case "facilities": return prisma.facility.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }] });
     case "specialties": return prisma.specialty.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }] });
     case "treatments": return prisma.treatment.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }] });
     case "services": return prisma.service.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }] });
@@ -34,6 +36,7 @@ async function findMany(key: CollectionKey) {
 
 function getFallbackCollection(key: CollectionKey) {
   switch (key) {
+    case "facilities": return FALLBACK_FACILITIES;
     case "specialties": return FALLBACK_SPECIALTIES;
     case "treatments": return FALLBACK_TREATMENTS;
     case "services": return FALLBACK_SERVICES;
@@ -99,6 +102,7 @@ async function uniqueSlug(key: CollectionKey, base: string): Promise<string> {
   for (let i = 2; i < 50; i++) {
     let hit: unknown = null;
     switch (key) {
+      case "facilities": hit = await prisma.facility.findUnique({ where: { slug } }); break;
       case "specialties": hit = await prisma.specialty.findUnique({ where: { slug } }); break;
       case "treatments": hit = await prisma.treatment.findUnique({ where: { slug } }); break;
       case "services": hit = await prisma.service.findUnique({ where: { slug } }); break;
@@ -119,6 +123,7 @@ function cleanMediaIds(v: unknown): string[] {
 
 async function insertRow(key: CollectionKey, data: Record<string, unknown>) {
   switch (key) {
+    case "facilities": return prisma.facility.create({ data: data as never });
     case "specialties": return prisma.specialty.create({ data: data as never });
     case "treatments": return prisma.treatment.create({ data: data as never });
     case "services": return prisma.service.create({ data: data as never });
@@ -133,6 +138,7 @@ async function insertRow(key: CollectionKey, data: Record<string, unknown>) {
 
 async function updateRow(key: CollectionKey, id: string, data: Record<string, unknown>) {
   switch (key) {
+    case "facilities": return prisma.facility.update({ where: { id }, data: data as never });
     case "specialties": return prisma.specialty.update({ where: { id }, data: data as never });
     case "treatments": return prisma.treatment.update({ where: { id }, data: data as never });
     case "services": return prisma.service.update({ where: { id }, data: data as never });
@@ -147,6 +153,7 @@ async function updateRow(key: CollectionKey, id: string, data: Record<string, un
 
 async function deleteRow(key: CollectionKey, id: string) {
   switch (key) {
+    case "facilities": return prisma.facility.delete({ where: { id } });
     case "specialties": return prisma.specialty.delete({ where: { id } });
     case "treatments": return prisma.treatment.delete({ where: { id } });
     case "services": return prisma.service.delete({ where: { id } });

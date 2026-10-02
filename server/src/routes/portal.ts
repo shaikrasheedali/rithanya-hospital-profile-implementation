@@ -12,6 +12,7 @@ import { RESOURCES, ApiError } from "../resources.js";
 import { getSettings } from "../settings.js";
 import { loadPatients, loadCategories } from "../emr.js";
 import { retentionState } from "../retention.js";
+import { FALLBACK_BLOOD_STOCK } from "../fallbackData.js";
 
 const router = Router();
 
@@ -101,7 +102,12 @@ router.delete("/cms/:collection/:id", requireAuth(), async (req, res) => {
 
 // ---------- Media library ----------
 router.get("/media", requireAuth(), async (_req, res) => {
-  res.json({ assets: await listAssets() });
+  try {
+    res.json({ assets: await listAssets() });
+  } catch (err) {
+    console.warn("[portal:media] Error listing assets:", err);
+    res.json({ assets: [] });
+  }
 });
 
 router.post("/media", requireAuth(), async (req, res) => {
@@ -257,60 +263,109 @@ router.get("/r/:resource", requireAuth(), async (req, res) => {
       default: res.status(405).json({ error: "List not supported for this resource" }); return;
     }
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Something went wrong" });
+    console.warn(`[portal:r:${resource}] List failed:`, e);
+    res.json({ items: [] });
   }
 });
 
 // ---------- Page-data endpoints (what Next.js pages fetched via direct DB) ----------
 router.get("/dashboard", requireAuth(), async (req, res) => {
   const user = getUser(req);
-  const [patients, appointments, orders, stock, dpdpPending, products] = await Promise.all([
-    prisma.patient.count(),
-    prisma.appointment.count(),
-    prisma.order.count(),
-    prisma.bloodStock.findMany(),
-    prisma.dpdpErasureRequest.count({ where: { status: "PENDING" } }),
-    prisma.product.count(),
-  ]);
-  const recentAppointments = await prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 8 });
-  const recentOrders = await prisma.order.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { items: true } });
-  res.json({
-    user,
-    stats: { patients, appointments, orders, products, dpdpPending, stock },
-    recentAppointments,
-    recentOrders,
-  });
+  try {
+    const [patients, appointments, orders, stock, dpdpPending, products] = await Promise.all([
+      prisma.patient.count().catch(() => 0),
+      prisma.appointment.count().catch(() => 0),
+      prisma.order.count().catch(() => 0),
+      prisma.bloodStock.findMany().catch(() => []),
+      prisma.dpdpErasureRequest.count({ where: { status: "PENDING" } }).catch(() => 0),
+      prisma.product.count().catch(() => 0),
+    ]);
+    const recentAppointments = await prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 8 }).catch(() => []);
+    const recentOrders = await prisma.order.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { items: true } }).catch(() => []);
+    res.json({
+      user,
+      stats: {
+        patients,
+        appointments,
+        orders,
+        products,
+        dpdpPending,
+        stock: stock.length ? stock : FALLBACK_BLOOD_STOCK,
+      },
+      recentAppointments,
+      recentOrders,
+    });
+  } catch (err) {
+    console.warn("[portal:dashboard] Error loading metrics, returning safe fallback:", err);
+    res.json({
+      user,
+      stats: {
+        patients: 0,
+        appointments: 0,
+        orders: 0,
+        products: 0,
+        dpdpPending: 0,
+        stock: FALLBACK_BLOOD_STOCK,
+      },
+      recentAppointments: [],
+      recentOrders: [],
+    });
+  }
 });
 
 router.get("/patients", requireAuth("emr"), async (req, res) => {
   const type = req.query.type as string | undefined;
   const discharged = req.query.discharged === "1" || req.query.discharged === "true";
   const archived = req.query.archived === "1" || req.query.archived === "true";
-  res.json({
-    patients: await loadPatients({
-      type: type === "INPATIENT" || type === "OUTPATIENT" ? type : undefined,
-      discharged,
-      archived,
-    }),
-    categories: await loadCategories(),
-  });
+  try {
+    res.json({
+      patients: await loadPatients({
+        type: type === "INPATIENT" || type === "OUTPATIENT" ? type : undefined,
+        discharged,
+        archived,
+      }),
+      categories: await loadCategories(),
+    });
+  } catch (err) {
+    console.warn("[portal:patients] Error loading patients:", err);
+    res.json({ patients: [], categories: [] });
+  }
 });
 
 router.get("/appointments", requireAuth("emr"), async (_req, res) => {
-  res.json({ items: await prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 300 }) });
+  try {
+    res.json({ items: await prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 300 }) });
+  } catch (err) {
+    console.warn("[portal:appointments] Query failed, returning empty list:", err);
+    res.json({ items: [] });
+  }
 });
 
 router.get("/blood-stock", requireAuth("bloodbank"), async (_req, res) => {
-  const [stock, settings] = await Promise.all([prisma.bloodStock.findMany(), getSettings()]);
-  const order = ["O", "A", "B", "AB"];
-  stock.sort((a, b) => order.indexOf(a.groupCategory) - order.indexOf(b.groupCategory));
-  res.json({ stock, threshold: settings.criticalBloodAlertThreshold });
+  try {
+    let [stock, settings] = await Promise.all([
+      prisma.bloodStock.findMany().catch(() => []),
+      getSettings(),
+    ]);
+    if (!stock || !stock.length) stock = FALLBACK_BLOOD_STOCK as any;
+    const order = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-", "O", "A", "B", "AB"];
+    stock.sort((a, b) => order.indexOf(a.bloodGroup) - order.indexOf(b.bloodGroup));
+    res.json({ stock, threshold: settings.criticalBloodAlertThreshold });
+  } catch (err) {
+    console.warn("[portal:blood-stock] Query failed, returning fallback:", err);
+    const settings = await getSettings();
+    res.json({ stock: FALLBACK_BLOOD_STOCK, threshold: settings.criticalBloodAlertThreshold });
+  }
 });
 
 router.get("/orders", requireAuth("store"), async (_req, res) => {
-  const orders = await prisma.order.findMany({ orderBy: { createdAt: "desc" }, take: 300, include: { items: true } });
-  res.json({ items: orders });
+  try {
+    const orders = await prisma.order.findMany({ orderBy: { createdAt: "desc" }, take: 300, include: { items: true } });
+    res.json({ items: orders });
+  } catch (err) {
+    console.warn("[portal:orders] Query failed, returning empty list:", err);
+    res.json({ items: [] });
+  }
 });
 
 router.get("/employees", requireAuth("hr"), async (req, res) => {

@@ -9,11 +9,12 @@ import { formatDate, telHref } from "@/lib/utils";
 type A = { id: string; fullName: string; phone: string; department: string; preferredDate: string; message: string; source: string; status: string; createdAt: string };
 const TONE: Record<string, "blue" | "green" | "slate" | "red"> = { NEW: "blue", CONFIRMED: "green", COMPLETED: "slate", CANCELLED: "red" };
 
-export function AppointmentsDesk({ rows }: { rows: A[] }) {
+export function AppointmentsDesk({ rows = [] }: { rows?: A[] }) {
   const navigate = useNavigate();
   const toast = useToast();
   const [f, setF] = useState("ALL");
-  const list = rows.filter((r) => f === "ALL" || r.status === f);
+  const safeRows = rows ?? [];
+  const list = safeRows.filter((r) => f === "ALL" || r.status === f);
 
   async function setStatus(id: string, status: string) {
     const r = await api(`/api/portal/r/appointments/${id}`, "PUT", { status });
@@ -32,7 +33,7 @@ export function AppointmentsDesk({ rows }: { rows: A[] }) {
       <PageHeader title="Appointment requests" desc="Requests from the website hero, contact form and Thalassemia daycare CTA. Call back to confirm the slot." />
       <div className="mb-4 flex flex-wrap gap-2">
         {["ALL", "NEW", "CONFIRMED", "COMPLETED", "CANCELLED"].map((s) => (
-          <button key={s} onClick={() => setF(s)} aria-pressed={f === s} className={`rounded-full border px-4 py-1.5 font-medium ${f === s ? "border-royal bg-royal text-white" : "border-line bg-white hover:border-royal"}`}>{s === "ALL" ? "All" : s.charAt(0) + s.slice(1).toLowerCase()} ({s === "ALL" ? rows.length : rows.filter((r) => r.status === s).length})</button>
+          <button key={s} onClick={() => setF(s)} aria-pressed={f === s} className={`rounded-full border px-4 py-1.5 font-medium ${f === s ? "border-royal bg-royal text-white" : "border-line bg-white hover:border-royal"}`}>{s === "ALL" ? "All" : s.charAt(0) + s.slice(1).toLowerCase()} ({s === "ALL" ? safeRows.length : safeRows.filter((r) => r.status === s).length})</button>
         ))}
       </div>
       <Card>

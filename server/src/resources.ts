@@ -234,12 +234,13 @@ const bloodbank: Handler = {
     if (!stocks.length) throw new ApiError("No stock values supplied");
     const colors: Record<string, string> = { O: "SKY_BLUE", A: "YELLOW", B: "RED", AB: "WHITE" };
     for (const s of stocks) {
-      const g = oneOf(s.bloodGroup, ["O", "A", "B", "AB"] as const, "blood group");
+      const g = oneOf(s.bloodGroup, ["O", "A", "B", "AB", "O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"] as const, "blood group");
       const wb = num(s.wholeBloodUnits, "Whole blood units", { min: 0, max: 9999 })!;
       const pl = num(s.plasmaUnits, "Plasma units", { min: 0, max: 9999 })!;
+      const cat = g.replace(/[+-]/g, "");
       await prisma.bloodStock.upsert({
         where: { bloodGroup: g },
-        create: { bloodGroup: g, groupCategory: g, colorCode: colors[g], wholeBloodUnits: wb, plasmaUnits: pl },
+        create: { bloodGroup: g, groupCategory: cat, colorCode: colors[cat] ?? "WHITE", wholeBloodUnits: wb, plasmaUnits: pl },
         update: { wholeBloodUnits: wb, plasmaUnits: pl, lastUpdated: new Date() },
       });
     }

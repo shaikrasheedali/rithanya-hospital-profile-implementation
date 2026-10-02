@@ -16,12 +16,16 @@ export default function DashboardPage() {
   if (loading) return <LoadingCard />;
   if (error || !data) return <ErrorCard error={error ?? "Could not load dashboard"} />;
 
+  const stats = data.stats ?? { patients: 0, appointments: 0, orders: 0, products: 0, dpdpPending: 0 };
+  const appointments = data.recentAppointments ?? [];
+  const orders = data.recentOrders ?? [];
+
   const cards: Array<[string, number, string]> = [
-    ["Patients (EMR)", data.stats.patients, "/portal/outpatients"],
-    ["Appointments", data.stats.appointments, "/portal/appointments"],
-    ["Store orders", data.stats.orders, "/portal/store/orders"],
-    ["Products", data.stats.products, "/portal/store/products"],
-    ["DPDP pending", data.stats.dpdpPending, "/portal/compliance/dpdp-requests"],
+    ["Patients (EMR)", stats.patients ?? 0, "/portal/outpatients"],
+    ["Appointments", stats.appointments ?? 0, "/portal/appointments"],
+    ["Store orders", stats.orders ?? 0, "/portal/store/orders"],
+    ["Products", stats.products ?? 0, "/portal/store/products"],
+    ["DPDP pending", stats.dpdpPending ?? 0, "/portal/compliance/dpdp-requests"],
   ];
 
   return (
@@ -39,19 +43,19 @@ export default function DashboardPage() {
         <Card className="p-6">
           <h2 className="text-lg font-semibold">Recent appointments</h2>
           <ul className="mt-4 divide-y divide-line">
-            {data.recentAppointments.map((a) => (
+            {appointments.map((a) => (
               <li key={a.id} className="py-2.5 text-base"><strong>{a.fullName}</strong> · {a.department || "General"} · <span className="text-ink/65">{a.status}</span></li>
             ))}
-            {data.recentAppointments.length === 0 && <li className="py-4 text-ink/60">No appointments yet.</li>}
+            {appointments.length === 0 && <li className="py-4 text-ink/60">No appointments yet.</li>}
           </ul>
         </Card>
         <Card className="p-6">
           <h2 className="text-lg font-semibold">Recent orders</h2>
           <ul className="mt-4 divide-y divide-line">
-            {data.recentOrders.map((o) => (
+            {orders.map((o) => (
               <li key={o.id} className="py-2.5 text-base"><strong>{o.orderNumber}</strong> · {o.customerName} · <span className="text-ink/65">{o.status}</span></li>
             ))}
-            {data.recentOrders.length === 0 && <li className="py-4 text-ink/60">No orders yet.</li>}
+            {orders.length === 0 && <li className="py-4 text-ink/60">No orders yet.</li>}
           </ul>
         </Card>
       </div>

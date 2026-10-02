@@ -635,9 +635,134 @@ export const FALLBACK_PRODUCTS = [
   },
 ];
 
+export const FALLBACK_FACILITIES = [
+  {
+    id: "fac-1",
+    title: "24/7 Emergency & Observation Wing",
+    slug: "24-7-emergency-and-observation-wing",
+    shortSummary: "Round-the-clock emergency care, rapid triage, trauma stabilization, observation beds and IV hydration therapy.",
+    contentHtml:
+      h("Round-the-Clock Emergency Response") +
+      p("Our emergency department operates 24/7, 365 days a year with dedicated medical officers, critical care trained nursing staff, continuous vitals monitoring, and observation beds.") +
+      ul([
+        "24/7 emergency triage and acute medical stabilization",
+        "Dedicated observation beds with multi-parameter monitors",
+        "Rapid IV hydration and emergency medication administration",
+        "Direct link to diagnostic laboratory and round-the-clock pharmacy",
+      ]),
+    sortOrder: 0,
+    media: [
+      { id: "m-emergency-beds", url: "/seed/hospital-corridor.webp", kind: "IMAGE" as const, originalName: "hospital-corridor.webp" },
+      { id: "m-doctor-vitals", url: "/seed/doctor-vitals.webp", kind: "IMAGE" as const, originalName: "doctor-vitals.webp" },
+    ],
+  },
+  {
+    id: "fac-2",
+    title: "Daycare Blood Transfusion Centre",
+    slug: "daycare-blood-transfusion-centre",
+    shortSummary: "Sanitised, family-friendly daycare transfusion unit with dedicated nursing, blood warmer technology, and saline flush protocols.",
+    contentHtml:
+      h("Safe, Sanitised Transfusion Protocols") +
+      p("Rithanya Hospital is renowned across Khammam for its compassionate Daycare Transfusion Centre, providing scheduled blood transfusions for Thalassemia, Sickle Cell, and severe anaemia patients in a comfortable environment.") +
+      ul([
+        "Pre-transfusion screening and blood cross-matching verification",
+        "Bedside nursing with real-time temperature and pulse monitoring",
+        "Post-transfusion hydration and ferritin level tracking",
+        "Subsidized and charitable care coordination",
+      ]),
+    sortOrder: 1,
+    media: [
+      { id: "m-transfusion-unit", url: "/seed/blood-bags.webp", kind: "IMAGE" as const, originalName: "blood-bags.webp" },
+      { id: "m-nurse-care", url: "/seed/nurse-care.webp", kind: "IMAGE" as const, originalName: "nurse-care.webp" },
+    ],
+  },
+  {
+    id: "fac-3",
+    title: "In-House Diagnostic Laboratory",
+    slug: "in-house-diagnostic-laboratory",
+    shortSummary: "Automated clinical biochemistry, hematology, HbA1c testing, blood grouping and infectious disease serology with rapid turnaround.",
+    contentHtml:
+      h("Precision Laboratory Diagnostics") +
+      p("Equipped with automated hematology analyzers, biochemistry platforms, and electrolyte testers to deliver accurate diagnostic reports within hours.") +
+      ul([
+        "Automated CBC, Hemoglobin electrophoresis, and blood smear testing",
+        "HbA1c, lipid profiles, renal function, and liver enzyme panels",
+        "Rapid serological testing for Dengue, Malaria, Typhoid, and Viral Fevers",
+        "Computerized barcoded samples ensuring zero sample mix-ups",
+      ]),
+    sortOrder: 2,
+    media: [
+      { id: "m-lab-microscope", url: "/seed/lab-microscope.webp", kind: "IMAGE" as const, originalName: "lab-microscope.webp" },
+      { id: "m-glucose-strips", url: "/seed/glucose-strips.webp", kind: "IMAGE" as const, originalName: "glucose-strips.webp" },
+    ],
+  },
+  {
+    id: "fac-4",
+    title: "24/7 Pharmacy & Cold Storage",
+    slug: "24-7-pharmacy-and-cold-storage",
+    shortSummary: "Fully stocked hospital pharmacy with cold chain storage for insulin, vaccines, and emergency life-saving formulations.",
+    contentHtml:
+      h("Reliable Medication Access Around the Clock") +
+      p("Our in-house pharmacy dispenses 100% genuine medications, chronic maintenance drugs, insulin cartridges, surgical disposables, and pediatric suspensions at transparent prices.") +
+      ul([
+        "Temperature-controlled cold storage for biologics and insulin",
+        "24/7 walk-in counter and instant bedside dispensing for inpatients",
+        "Digital billing with GST-compliant itemized receipts",
+        "Online home delivery and WhatsApp prescription refills",
+      ]),
+    sortOrder: 3,
+    media: [
+      { id: "m-pharmacy-shelves", url: "/seed/pharmacy-shelves.webp", kind: "IMAGE" as const, originalName: "pharmacy-shelves.webp" },
+      { id: "m-pharmacy-counter", url: "/seed/pharmacy-counter.webp", kind: "IMAGE" as const, originalName: "pharmacy-counter.webp" },
+    ],
+  },
+  {
+    id: "fac-5",
+    title: "Wheelchair-Accessible Infrastructure",
+    slug: "wheelchair-accessible-infrastructure",
+    shortSummary: "Gentle entrance ramps, spacious non-slip corridors, accessible restrooms, and dedicated wheelchair assistance.",
+    contentHtml:
+      h("Barrier-Free Care for Every Patient") +
+      p("Designed from the ground up to ensure effortless mobility for senior citizens, post-operative patients, and individuals with disabilities.") +
+      ul([
+        "Gradual incline ramps with sturdy support handrails at all entries",
+        "Wide corridors accommodating patient stretchers and wheelchairs comfortably",
+        "Specially fitted accessible washrooms with safety grab-bars",
+        "Hospital assistance staff available at the porch on arrival",
+      ]),
+    sortOrder: 4,
+    media: [
+      { id: "m-hospital-corridor", url: "/seed/hospital-corridor.webp", kind: "IMAGE" as const, originalName: "hospital-corridor.webp" },
+    ],
+  },
+  {
+    id: "fac-6",
+    title: "Cashless Insurance & Ayushman Desk",
+    slug: "cashless-insurance-and-ayushman-desk",
+    shortSummary: "Dedicated liaison officers facilitating seamless pre-authorizations for PM-JAY, Aarogyasri, and major private health TPAs.",
+    contentHtml:
+      h("Hassle-Free Health Insurance Processing") +
+      p("Our dedicated insurance assistance desk guides patients and families through paperwork, pre-authorization claims, and fast settlement.") +
+      ul([
+        "Empaneled under Ayushman Bharat PM-JAY and Telangana Aarogyasri",
+        "Network hospital for Star Health, Care Health, HDFC ERGO, ICICI Lombard",
+        "Transparent pre-authorization and query-resolution desk",
+        "Zero-delay admission coordination for covered procedures",
+      ]),
+    sortOrder: 5,
+    media: [
+      { id: "m-insurance-desk", url: "/seed/doctor-consult.webp", kind: "IMAGE" as const, originalName: "doctor-consult.webp" },
+    ],
+  },
+];
+
 export const FALLBACK_BLOOD_STOCK = [
-  { id: "bs-o", bloodGroup: "O", groupCategory: "O", colorCode: "SKY_BLUE", wholeBloodUnits: 14, plasmaUnits: 9, lastUpdated: new Date() },
-  { id: "bs-a", bloodGroup: "A", groupCategory: "A", colorCode: "YELLOW", wholeBloodUnits: 11, plasmaUnits: 7, lastUpdated: new Date() },
-  { id: "bs-b", bloodGroup: "B", groupCategory: "B", colorCode: "RED", wholeBloodUnits: 9, plasmaUnits: 6, lastUpdated: new Date() },
-  { id: "bs-ab", bloodGroup: "AB", groupCategory: "AB", colorCode: "WHITE", wholeBloodUnits: 4, plasmaUnits: 3, lastUpdated: new Date() },
+  { id: "bs-op", bloodGroup: "O+", groupCategory: "O", colorCode: "SKY_BLUE", wholeBloodUnits: 14, plasmaUnits: 9, lastUpdated: new Date() },
+  { id: "bs-on", bloodGroup: "O-", groupCategory: "O", colorCode: "SKY_BLUE", wholeBloodUnits: 8, plasmaUnits: 5, lastUpdated: new Date() },
+  { id: "bs-ap", bloodGroup: "A+", groupCategory: "A", colorCode: "YELLOW", wholeBloodUnits: 11, plasmaUnits: 7, lastUpdated: new Date() },
+  { id: "bs-an", bloodGroup: "A-", groupCategory: "A", colorCode: "YELLOW", wholeBloodUnits: 6, plasmaUnits: 4, lastUpdated: new Date() },
+  { id: "bs-bp", bloodGroup: "B+", groupCategory: "B", colorCode: "RED", wholeBloodUnits: 9, plasmaUnits: 6, lastUpdated: new Date() },
+  { id: "bs-bn", bloodGroup: "B-", groupCategory: "B", colorCode: "RED", wholeBloodUnits: 5, plasmaUnits: 3, lastUpdated: new Date() },
+  { id: "bs-abp", bloodGroup: "AB+", groupCategory: "AB", colorCode: "WHITE", wholeBloodUnits: 4, plasmaUnits: 3, lastUpdated: new Date() },
+  { id: "bs-abn", bloodGroup: "AB-", groupCategory: "AB", colorCode: "WHITE", wholeBloodUnits: 2, plasmaUnits: 2, lastUpdated: new Date() },
 ];

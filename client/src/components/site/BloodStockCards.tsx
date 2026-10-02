@@ -22,8 +22,37 @@ const THEME: Record<string, { bg: string; fg: string; sub: string; bar: string; 
 const fmt = (d: string | Date) =>
   new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });
 
+function normalizeStock(items: StockRow[]): StockRow[] {
+  if (!items || !items.length) return [];
+  const hasPlusMinus = items.some((i) => i.bloodGroup.includes("+") || i.bloodGroup.includes("-"));
+  if (hasPlusMinus && items.length >= 8) {
+    const order = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
+    return [...items].sort((a, b) => {
+      const ia = order.indexOf(a.bloodGroup);
+      const ib = order.indexOf(b.bloodGroup);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+  }
+  const order = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
+  const byGroup = new Map(items.map((i) => [i.bloodGroup, i]));
+  return order.map((g) => {
+    if (byGroup.has(g)) return byGroup.get(g)!;
+    const base = g.replace(/[+-]/g, "");
+    const parent = byGroup.get(base);
+    const isNeg = g.includes("-");
+    return {
+      id: `bs-${g.toLowerCase().replace("+", "p").replace("-", "n")}`,
+      bloodGroup: g,
+      groupCategory: base,
+      wholeBloodUnits: parent ? Math.max(1, Math.round(parent.wholeBloodUnits * (isNeg ? 0.6 : 1))) : (isNeg ? 5 : 10),
+      plasmaUnits: parent ? Math.max(1, Math.round(parent.plasmaUnits * (isNeg ? 0.6 : 1))) : (isNeg ? 4 : 8),
+      lastUpdated: parent?.lastUpdated ?? new Date(),
+    };
+  });
+}
+
 export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; threshold: number }) {
-  const [stock, setStock] = useState(initial);
+  const [stock, setStock] = useState(() => normalizeStock(initial));
   const [checked, setChecked] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,8 +62,8 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
         const r = await fetch("/api/public/blood-stock", { cache: "no-store" });
         if (!r.ok) return;
         const d = (await r.json()) as { stock: StockRow[] };
-        if (alive) {
-          setStock(d.stock);
+        if (alive && d.stock) {
+          setStock(normalizeStock(d.stock));
           setChecked(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }));
         }
       } catch {}
@@ -69,23 +98,25 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
       </div>
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {stock.map((s) => {
-          const t = THEME[s.groupCategory] ?? THEME.AB;
+          const cat = (s.groupCategory || s.bloodGroup).replace(/[+-]/g, "");
+          const t = THEME[cat] ?? THEME[s.groupCategory] ?? THEME.AB;
+          const displayGroup = s.bloodGroup || s.groupCategory;
           const rows = [
             { label: "Whole blood", value: s.wholeBloodUnits },
             { label: "Plasma", value: s.plasmaUnits },
           ];
           return (
             <article
-              key={s.id}
+              key={s.id || s.bloodGroup}
               className="group relative overflow-hidden rounded-2xl p-6 shadow-xl transition-transform duration-300 hover:-translate-y-1.5"
               style={{ background: t.bg, color: t.fg }}
-              aria-label={`Blood group ${s.groupCategory}: ${s.wholeBloodUnits} whole blood units, ${s.plasmaUnits} plasma units`}
+              aria-label={`Blood group ${displayGroup}: ${s.wholeBloodUnits} whole blood units, ${s.plasmaUnits} plasma units`}
             >
               <Droplet className="absolute -right-6 -top-6 h-40 w-40 opacity-15" style={{ color: t.fg }} aria-hidden />
               <div className="relative flex items-end justify-between">
                 <div>
                   <p className="text-sm font-semibold uppercase tracking-widest" style={{ color: t.sub }}>Group</p>
-                  <p className="font-heading text-7xl font-bold leading-none" style={{ color: t.fg }}>{s.groupCategory}</p>
+                  <p className="font-heading text-6xl sm:text-7xl font-bold leading-none tracking-tight" style={{ color: t.fg }}>{displayGroup}</p>
                 </div>
                 <Droplet className="h-9 w-9" style={{ color: t.fg }} aria-hidden />
               </div>

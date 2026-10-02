@@ -29,12 +29,39 @@ function Stepper({ label, value, onChange, low, fg }: { label: string; value: nu
   );
 }
 
+function normalizeRows(items: Row[]): Row[] {
+  if (!items || !items.length) return [];
+  const order = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
+  const hasPlusMinus = items.some((i) => i.bloodGroup.includes("+") || i.bloodGroup.includes("-"));
+  if (hasPlusMinus && items.length >= 8) {
+    return [...items].sort((a, b) => {
+      const ia = order.indexOf(a.bloodGroup);
+      const ib = order.indexOf(b.bloodGroup);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+  }
+  const byGroup = new Map(items.map((i) => [i.bloodGroup, i]));
+  return order.map((g) => {
+    if (byGroup.has(g)) return byGroup.get(g)!;
+    const base = g.replace(/[+-]/g, "");
+    const parent = byGroup.get(base);
+    const isNeg = g.includes("-");
+    return {
+      bloodGroup: g,
+      groupCategory: base,
+      wholeBloodUnits: parent ? Math.max(1, Math.round(parent.wholeBloodUnits * (isNeg ? 0.6 : 1))) : (isNeg ? 5 : 10),
+      plasmaUnits: parent ? Math.max(1, Math.round(parent.plasmaUnits * (isNeg ? 0.6 : 1))) : (isNeg ? 4 : 8),
+      lastUpdated: parent?.lastUpdated ?? new Date().toISOString(),
+    };
+  });
+}
+
 export function BloodBankManager({ initial, threshold }: { initial: Row[]; threshold: number }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const [rows, setRows] = useState(initial);
+  const [rows, setRows] = useState(() => normalizeRows(initial));
   const [busy, setBusy] = useState(false);
-  const dirty = JSON.stringify(rows.map((r) => [r.bloodGroup, r.wholeBloodUnits, r.plasmaUnits])) !== JSON.stringify(initial.map((r) => [r.bloodGroup, r.wholeBloodUnits, r.plasmaUnits]));
+  const dirty = JSON.stringify(rows.map((r) => [r.bloodGroup, r.wholeBloodUnits, r.plasmaUnits])) !== JSON.stringify(normalizeRows(initial).map((r) => [r.bloodGroup, r.wholeBloodUnits, r.plasmaUnits]));
   const latest = initial.reduce<string>((a, r) => (r.lastUpdated > a ? r.lastUpdated : a), "");
 
   const set = (g: string, key: "wholeBloodUnits" | "plasmaUnits", v: number) => setRows((rs) => rs.map((r) => (r.bloodGroup === g ? { ...r, [key]: v } : r)));
@@ -56,11 +83,13 @@ export function BloodBankManager({ initial, threshold }: { initial: Row[]; thres
       </PageHeader>
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         {rows.map((r) => {
-          const t = THEME[r.groupCategory] ?? THEME.AB;
+          const cat = (r.groupCategory || r.bloodGroup).replace(/[+-]/g, "");
+          const t = THEME[cat] ?? THEME[r.groupCategory] ?? THEME.AB;
+          const displayGroup = r.bloodGroup || r.groupCategory;
           return (
-            <section key={r.bloodGroup} className="relative overflow-hidden rounded-2xl border border-black/5 p-6 shadow-lg" style={{ background: t.bg, color: t.fg }} aria-label={`Group ${r.groupCategory}`}>
+            <section key={r.bloodGroup} className="relative overflow-hidden rounded-2xl border border-black/5 p-6 shadow-lg" style={{ background: t.bg, color: t.fg }} aria-label={`Group ${displayGroup}`}>
               <Droplet className="absolute -right-5 -top-5 h-32 w-32 opacity-15" />
-              <p className="font-heading text-6xl font-bold leading-none">{r.groupCategory}</p>
+              <p className="font-heading text-6xl font-bold leading-none">{displayGroup}</p>
               <p className="mb-5 mt-1 text-sm font-semibold uppercase tracking-widest opacity-80">Blood group</p>
               <div className="space-y-5">
                 <Stepper label="Whole blood units" value={r.wholeBloodUnits} onChange={(v) => set(r.bloodGroup, "wholeBloodUnits", v)} low={r.wholeBloodUnits <= threshold} fg={t.fg} />

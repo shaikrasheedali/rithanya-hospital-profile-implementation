@@ -78,8 +78,9 @@ export default function AboutPage() {
               </Reveal>
             ))}
           </div>
-          <div className="mt-12 text-center">
-            <Link to="/contact" className="inline-flex rounded-full bg-royal px-7 py-3 font-semibold text-white hover:bg-alert">Plan your visit</Link>
+          <div className="mt-12 flex flex-wrap items-center justify-center gap-4 text-center">
+            <Link to="/facilities" className="inline-flex rounded-full bg-royal px-7 py-3 font-semibold text-white hover:bg-alert">Explore all hospital facilities →</Link>
+            <Link to="/contact" className="inline-flex rounded-full border border-line bg-canvas px-7 py-3 font-semibold text-navy hover:bg-white">Plan your visit</Link>
           </div>
         </div>
       </section>

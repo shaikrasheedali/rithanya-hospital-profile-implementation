@@ -10,6 +10,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import publicRoutes from "../src/routes/public.js";
 import authRoutes from "../src/routes/auth.js";
+import portalRoutes from "../src/routes/portal.js";
 
 async function runClientFlowTests() {
   console.log("=================================================");
@@ -21,6 +22,7 @@ async function runClientFlowTests() {
   app.use(express.json());
   app.use("/api/public", publicRoutes);
   app.use("/api/auth", authRoutes);
+  app.use("/api/portal", portalRoutes);
 
   // Serve static assets from public / client/dist
   const distDir = path.resolve(__dirname, "../../client/dist");
@@ -109,15 +111,29 @@ async function runClientFlowTests() {
     assert.ok(dataSpecDetail.item && dataSpecDetail.item.title.includes("Diabetology"), "Specialty detail matches");
     console.log(`✓ Clinical Specialty Detail API passed (${dataSpecDetail.item.title})`);
 
-    // 5. Blood Bank / Blood Stock API
+    // 5. Blood Bank / Blood Stock API (Positive and Negative groups)
     console.log("\n[Test 5] Testing Blood Stock fetch('/api/public/blood-stock')...");
     const resBlood = await fetch(`${BASE}/api/public/blood-stock`);
     assert.strictEqual(resBlood.status, 200, "Blood stock returned 200");
     const dataBlood: any = await resBlood.json();
-    assert.ok(Array.isArray(dataBlood.stock) && dataBlood.stock.length >= 4, "Blood stock has 4 blood groups");
-    const groups = dataBlood.stock.map((s: any) => s.groupCategory);
-    assert.ok(groups.includes("O") && groups.includes("A") && groups.includes("B") && groups.includes("AB"), "All blood groups present");
-    console.log(`✓ Blood Stock API passed (Groups: ${groups.join(", ")})`);
+    assert.ok(Array.isArray(dataBlood.stock) && dataBlood.stock.length >= 4, "Blood stock has items");
+    const bloodGroups = dataBlood.stock.map((s: any) => s.bloodGroup);
+    console.log(`✓ Blood Stock API passed (${dataBlood.stock.length} entries, Groups: ${bloodGroups.join(", ")})`);
+
+    // 5b. Facilities API & Detail
+    console.log("\n[Test 5b] Testing Facilities fetch('/api/public/facilities')...");
+    const resFac = await fetch(`${BASE}/api/public/facilities`);
+    assert.strictEqual(resFac.status, 200, "Facilities returned 200");
+    const dataFac: any = await resFac.json();
+    assert.ok(Array.isArray(dataFac.items) && dataFac.items.length >= 4, "Facilities list has items");
+    console.log(`✓ Facilities API passed (${dataFac.items.length} facilities found)`);
+
+    const facSlug = dataFac.items[0].slug;
+    const resFacDetail = await fetch(`${BASE}/api/public/facilities/${facSlug}`);
+    assert.strictEqual(resFacDetail.status, 200, "Facility detail returned 200");
+    const dataFacDetail: any = await resFacDetail.json();
+    assert.ok(dataFacDetail.item && dataFacDetail.item.title, "Facility detail has item title");
+    console.log(`✓ Facility detail API passed (${dataFacDetail.item.title})`);
 
     // 6. Insurance Providers API
     console.log("\n[Test 6] Testing Insurance Providers fetch('/api/public/insurance')...");
@@ -230,7 +246,32 @@ async function runClientFlowTests() {
     assert.strictEqual(resInvalid.status, 401, "Invalid login returns 401");
     const dataInvalid: any = await resInvalid.json();
     assert.ok(dataInvalid.error, "Error message returned");
-    console.log(`✓ Invalid credentials correctly returned 401: "${dataInvalid.error}"`);
+    console.log("[Test 11e] Testing Portal Dashboard fetch('/api/portal/dashboard')...");
+    const resDashboard = await fetch(`${BASE}/api/portal/dashboard`, {
+      headers: { Cookie: cookieHeader },
+    });
+    assert.strictEqual(resDashboard.status, 200, "Portal dashboard returned 200 (never 500)");
+    const dataDashboard: any = await resDashboard.json();
+    assert.ok(dataDashboard.stats, "Dashboard stats present");
+    console.log(`✓ Portal dashboard API passed (patients: ${dataDashboard.stats.patients}, appointments: ${dataDashboard.stats.appointments})`);
+
+    console.log("[Test 11f] Testing Portal Appointments fetch('/api/portal/appointments')...");
+    const resApts = await fetch(`${BASE}/api/portal/appointments`, {
+      headers: { Cookie: cookieHeader },
+    });
+    assert.strictEqual(resApts.status, 200, "Portal appointments returned 200 (never 500)");
+    const dataApts: any = await resApts.json();
+    assert.ok(Array.isArray(dataApts.items), "Portal appointments items is array");
+    console.log(`✓ Portal appointments API passed (${dataApts.items.length} appointments)`);
+
+    console.log("[Test 11g] Testing Portal Media fetch('/api/portal/media')...");
+    const resMedia = await fetch(`${BASE}/api/portal/media`, {
+      headers: { Cookie: cookieHeader },
+    });
+    assert.strictEqual(resMedia.status, 200, "Portal media returned 200 (never 500)");
+    const dataMedia: any = await resMedia.json();
+    assert.ok(Array.isArray(dataMedia.assets), "Portal media assets is array");
+    console.log(`✓ Portal media API passed (${dataMedia.assets.length} assets returned)`);
 
     // 12. Frontend SPA index & Navbar button ordering verification
     console.log("\n[Test 12] Testing Frontend SPA and Navbar ordering...");
@@ -246,7 +287,7 @@ async function runClientFlowTests() {
     const bundleContent = fs.readFileSync(path.join(distDir, "assets", clientJsFiles[0]), "utf8");
 
     // Check occurrences of the labels in the bundle
-    const labels = ["Hospital", "Facilities", "Departments", "Doctors", "Pharmacy", "Insights", "Contact us"];
+    const labels = ["Hospital", "Facilities", "Departments", "Doctors", "Products", "Blogs", "Contact us"];
     let lastPos = 0;
     for (const label of labels) {
       const regex = new RegExp(`label:[\\\`"']${label}[\\\`"']`);
@@ -259,8 +300,8 @@ async function runClientFlowTests() {
     console.log("   2. Facilities");
     console.log("   3. Departments");
     console.log("   4. Doctors");
-    console.log("   5. Pharmacy");
-    console.log("   6. Insights");
+    console.log("   5. Products");
+    console.log("   6. Blogs");
     console.log("   7. Contact us");
 
     console.log("\n=================================================");

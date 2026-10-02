@@ -15,6 +15,7 @@ import portalRoutes from "./routes/portal.js";
 import { IMAGE_DIR, VIDEO_DIR } from "./media.js";
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = Number(process.env.PORT ?? 4000);
 
 app.disable("x-powered-by");

@@ -13,6 +13,7 @@ export type FieldDef = {
 };
 
 export type CollectionKey =
+  | "facilities"
   | "specialties"
   | "treatments"
   | "services"
@@ -44,6 +45,22 @@ const sortOrder: FieldDef = {
 };
 
 export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
+  facilities: {
+    key: "facilities",
+    label: "Facilities",
+    singular: "Facility",
+    module: "cms",
+    titleField: "title",
+    slugSource: "title",
+    subtitleField: "shortSummary",
+    mediaHelp: "First image becomes the facility cover. Add more images or videos for facility details.",
+    fields: [
+      { name: "title", label: "Facility name", type: "text", required: true },
+      { name: "shortSummary", label: "Short summary", type: "textarea", required: true, max: 500 },
+      { name: "contentHtml", label: "Detailed overview", type: "richtext" },
+      sortOrder,
+    ],
+  },
   specialties: {
     key: "specialties",
     label: "Specialties",

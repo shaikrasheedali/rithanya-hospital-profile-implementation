@@ -29,6 +29,7 @@ const GROUPS: Group[] = [
   {
     title: "Website CMS",
     items: [
+      { label: "Facilities", href: "/portal/cms/facilities", icon: Building2, module: "cms" },
       { label: "Specialties", href: "/portal/cms/specialties", icon: HeartPulse, module: "cms" },
       { label: "Treatments", href: "/portal/cms/treatments", icon: Activity, module: "cms" },
       { label: "Services", href: "/portal/cms/services", icon: Siren, module: "cms" },

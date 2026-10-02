@@ -34,6 +34,7 @@ const VIDEO_TYPES: Record<string, string> = {
 };
 
 export type EntityType =
+  | "facilities"
   | "specialties"
   | "treatments"
   | "services"
@@ -60,16 +61,30 @@ export async function saveUploadFile(file: UploadedFile) {
     const filename = `${Date.now()}-${hashPart}.webp`;
     await fs.mkdir(IMAGE_DIR, { recursive: true });
     await fs.writeFile(path.join(IMAGE_DIR, filename), processed);
-    return prisma.mediaAsset.create({
-      data: {
+    try {
+      return await prisma.mediaAsset.create({
+        data: {
+          filename,
+          originalName: file.originalname,
+          mimeType: "image/webp",
+          kind: "IMAGE",
+          sizeInBytes: processed.length,
+          url: `/api/media/${filename}`,
+        },
+      });
+    } catch (dbErr) {
+      console.warn("[media] DB insert timed out or failed, returning file asset:", dbErr instanceof Error ? dbErr.message : dbErr);
+      return {
+        id: `media-${Date.now()}-${hashPart}`,
         filename,
         originalName: file.originalname,
         mimeType: "image/webp",
         kind: "IMAGE",
         sizeInBytes: processed.length,
         url: `/api/media/${filename}`,
-      },
-    });
+        createdAt: new Date(),
+      };
+    }
   }
 
   const ext = VIDEO_TYPES[file.mimetype];
@@ -78,16 +93,30 @@ export async function saveUploadFile(file: UploadedFile) {
     const filename = `${Date.now()}-${hashPart}.${ext}`;
     await fs.mkdir(VIDEO_DIR, { recursive: true });
     await fs.writeFile(path.join(VIDEO_DIR, filename), buf);
-    return prisma.mediaAsset.create({
-      data: {
+    try {
+      return await prisma.mediaAsset.create({
+        data: {
+          filename,
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+          kind: "VIDEO",
+          sizeInBytes: buf.length,
+          url: `/api/media/${filename}`,
+        },
+      });
+    } catch (dbErr) {
+      console.warn("[media] DB insert timed out or failed, returning video asset:", dbErr instanceof Error ? dbErr.message : dbErr);
+      return {
+        id: `media-${Date.now()}-${hashPart}`,
         filename,
         originalName: file.originalname,
         mimeType: file.mimetype,
         kind: "VIDEO",
         sizeInBytes: buf.length,
         url: `/api/media/${filename}`,
-      },
-    });
+        createdAt: new Date(),
+      };
+    }
   }
   throw new Error(`Unsupported file type: ${file.mimetype || "unknown"}. Upload an image or an MP4/WebM video.`);
 }

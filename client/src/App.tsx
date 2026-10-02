@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import SiteLayout from "@/pages/site/SiteLayout";
 import HomePage from "@/pages/site/Home";
 import AboutPage from "@/pages/site/About";
+import FacilitiesPage from "@/pages/site/Facilities";
+import FacilityDetailPage from "@/pages/site/FacilityDetail";
 import ClinicalCarePage from "@/pages/site/ClinicalCare";
 import ClinicalTypePage from "@/pages/site/ClinicalType";
 import ClinicalDetailPage from "@/pages/site/ClinicalDetail";
@@ -60,7 +62,8 @@ export default function App() {
         <Route element={<SiteLayout />}>
           <Route index element={<HomePage />} />
           <Route path="about" element={<AboutPage />} />
-          <Route path="facilities" element={<Navigate to="/about" replace />} />
+          <Route path="facilities" element={<FacilitiesPage />} />
+          <Route path="facilities/:slug" element={<FacilityDetailPage />} />
           <Route path="clinical-care" element={<ClinicalCarePage />} />
           <Route path="clinical-care/:type" element={<ClinicalTypePage />} />
           <Route path="clinical-care/:type/:slug" element={<ClinicalDetailPage />} />
@@ -76,10 +79,10 @@ export default function App() {
           <Route path="pharmacy" element={<Navigate to="/products" replace />} />
           <Route path="blood-bank" element={<BloodBankPublicPage />} />
           <Route path="gallery" element={<GalleryPage />} />
+          <Route path="blogs" element={<InsightsPage />} />
+          <Route path="blogs/:slug" element={<InsightDetailPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="insights/:slug" element={<InsightDetailPage />} />
-          <Route path="blogs" element={<Navigate to="/insights" replace />} />
-          <Route path="blogs/:slug" element={<Navigate to="/insights/:slug" replace />} />
           <Route path="insurance-providers" element={<InsurancePage />} />
           <Route path="insurance" element={<Navigate to="/insurance-providers" replace />} />
           <Route path="contact" element={<ContactPage />} />

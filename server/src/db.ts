@@ -46,9 +46,10 @@ function createClient(): PrismaClient {
     user: config.user,
     password: config.password,
     database: config.database,
-    connectTimeout: 4000,
-    acquireTimeout: 4000,
-    connectionLimit: 10,
+    connectTimeout: 8000,
+    acquireTimeout: 10000,
+    idleTimeout: 30000,
+    connectionLimit: 25,
   };
   // If socket path exists and host is local, prefer unix socket on Linux
   if (config.socketPath && (config.host === "127.0.0.1" || config.host === "localhost")) {

@@ -1,5 +1,8 @@
-import { prisma } from "./db.js";
+import fs from "node:fs/promises";
+import fsSync from "node:fs";
+import { prisma, isDbOnCooldown, reportDbError } from "./db.js";
 import { getSettings } from "./settings.js";
+import { IMAGE_DIR } from "./media.js";
 
 export type AssetRow = {
   id: string;
@@ -15,27 +18,58 @@ export type AssetRow = {
 };
 
 export async function listAssets(): Promise<AssetRow[]> {
-  const assets = await prisma.mediaAsset.findMany({
-    include: { links: true },
-    orderBy: { createdAt: "desc" },
-  });
-  const s = await getSettings();
-  return assets.map((a) => {
-    const linkedTo = Array.from(new Set(a.links.map((l) => l.entityType)));
-    const extra: string[] = [];
-    if (s.faviconUrl === a.url) extra.push("favicon");
-    if (s.socialShareThumbnailUrl === a.url) extra.push("og-image");
-    return {
-      id: a.id,
-      filename: a.filename,
-      originalName: a.originalName,
-      mimeType: a.mimeType,
-      kind: a.kind as "IMAGE" | "VIDEO",
-      sizeInBytes: a.sizeInBytes,
-      url: a.url,
-      createdAt: a.createdAt,
-      refs: a.links.length + extra.length,
-      linkedTo: [...linkedTo, ...extra],
-    };
-  });
+  if (!isDbOnCooldown()) {
+    try {
+      const assets = await prisma.mediaAsset.findMany({
+        include: { links: true },
+        orderBy: { createdAt: "desc" },
+      });
+      const s = await getSettings();
+      return assets.map((a) => {
+        const linkedTo = Array.from(new Set(a.links.map((l) => l.entityType)));
+        const extra: string[] = [];
+        if (s.faviconUrl === a.url) extra.push("favicon");
+        if (s.socialShareThumbnailUrl === a.url) extra.push("og-image");
+        return {
+          id: a.id,
+          filename: a.filename,
+          originalName: a.originalName,
+          mimeType: a.mimeType,
+          kind: a.kind as "IMAGE" | "VIDEO",
+          sizeInBytes: a.sizeInBytes,
+          url: a.url,
+          createdAt: a.createdAt,
+          refs: a.links.length + extra.length,
+          linkedTo: [...linkedTo, ...extra],
+        };
+      });
+    } catch (err) {
+      reportDbError(err);
+      console.warn("[media-admin] Failed to load assets from DB, scanning disk fallback:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  // Graceful fallback from disk: scan IMAGE_DIR
+  try {
+    if (fsSync.existsSync(IMAGE_DIR)) {
+      const files = await fs.readdir(IMAGE_DIR);
+      return files
+        .filter((f) => f.endsWith(".webp") || f.endsWith(".png") || f.endsWith(".jpg"))
+        .map((f, idx) => ({
+          id: `disk-${idx}-${f}`,
+          filename: f,
+          originalName: f,
+          mimeType: "image/webp",
+          kind: "IMAGE" as const,
+          sizeInBytes: 2048,
+          url: `/api/media/${f}`,
+          createdAt: new Date(),
+          refs: 0,
+          linkedTo: [],
+        }));
+    }
+  } catch (diskErr) {
+    console.warn("[media-admin] Fallback disk scan error:", diskErr);
+  }
+  return [];
 }
