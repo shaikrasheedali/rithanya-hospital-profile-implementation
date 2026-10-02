@@ -10,7 +10,7 @@ import { listAssets } from "../media-admin.js";
 import { saveUploadFile, deleteAssetFile, IMAGE_DIR, VIDEO_DIR, PRIVATE_DIR } from "../media.js";
 import { RESOURCES, ApiError } from "../resources.js";
 import { getSettings } from "../settings.js";
-import { loadPatients, loadCategories } from "../emr.js";
+import { loadPatients, loadCategories, getPatientById } from "../emr.js";
 import { retentionState } from "../retention.js";
 import { FALLBACK_BLOOD_STOCK } from "../fallbackData.js";
 import { getBloodStock } from "../content.js";
@@ -279,10 +279,11 @@ router.get("/r/:resource", requireAuth(), async (req, res) => {
 router.get("/dashboard", requireAuth(), async (req, res) => {
   const user = getUser(req);
   if (isDbOnCooldown()) {
+    const fallbackPatients = await loadPatients({ discharged: false });
     res.json({
       user,
       stats: {
-        patients: 0,
+        patients: fallbackPatients.length,
         appointments: 0,
         orders: 0,
         products: 0,
@@ -345,23 +346,32 @@ router.get("/patients", requireAuth("emr"), async (req, res) => {
   const type = req.query.type as string | undefined;
   const discharged = req.query.discharged === "1" || req.query.discharged === "true";
   const archived = req.query.archived === "1" || req.query.archived === "true";
-  if (isDbOnCooldown()) {
-    res.json({ patients: [], categories: [] });
-    return;
-  }
   try {
-    res.json({
-      patients: await loadPatients({
-        type: type === "INPATIENT" || type === "OUTPATIENT" ? type : undefined,
-        discharged,
-        archived,
-      }),
-      categories: await loadCategories(),
+    const patients = await loadPatients({
+      type: type === "INPATIENT" || type === "OUTPATIENT" ? type : undefined,
+      discharged,
+      archived,
     });
+    const categories = await loadCategories();
+    res.json({ patients, categories });
   } catch (err) {
-    reportDbError(err);
     console.warn("[portal:patients] Error loading patients:", err);
     res.json({ patients: [], categories: [] });
+  }
+});
+
+router.get("/patients/:id", requireAuth("emr"), async (req, res) => {
+  try {
+    const patient = await getPatientById(param(req.params.id));
+    if (!patient) {
+      res.status(404).json({ error: "Patient not found" });
+      return;
+    }
+    const categories = await loadCategories();
+    res.json({ patient, categories });
+  } catch (err) {
+    console.warn("[portal:patients/:id] Error loading patient:", err);
+    res.status(500).json({ error: "Failed to load patient profile" });
   }
 });
 

@@ -59,7 +59,6 @@ function PatientForm({ initial, type, cats, onDone, onCancel }: { initial?: Pati
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((s) => ({ ...s, [k]: v }));
 
   async function save() {
-    if (!initial && !f.consentPhoto) return toast("Capture the patient’s consent photo before saving.", "err");
     setBusy(true);
     const body = { ...f, patientType: type, consentPhoto: f.consentPhoto || undefined };
     const r = initial ? await api(`/api/portal/r/patients/${initial.id}`, "PUT", body) : await api("/api/portal/r/patients", "POST", body);
@@ -88,10 +87,28 @@ function PatientForm({ initial, type, cats, onDone, onCancel }: { initial?: Pati
         <Field label="Clinical condition & history" className="sm:col-span-2"><textarea rows={3} className={inputCls} value={f.clinicalCondition} onChange={(e) => set("clinicalCondition", e.target.value)} /></Field>
         <div className="sm:col-span-2"><span className="mb-1 block text-sm font-semibold text-navy">Drug & clinical allergies</span><AllergyTags value={f.allergies} onChange={(v) => set("allergies", v)} /></div>
         <div className="sm:col-span-2">
-          <span className="mb-1 block text-sm font-semibold text-navy">Consent photo {initial ? "" : "*"}</span>
+          <span className="mb-1 block text-sm font-semibold text-navy">Consent photo (optional — can be uploaded anytime later in profile)</span>
           <div className="flex flex-wrap items-center gap-4 rounded-xl border border-line bg-canvas p-4">
-            {photo ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={photo} alt="Consent" className="h-24 w-36 rounded-lg border border-line object-cover" /> : <div className="flex h-24 w-36 items-center justify-center rounded-lg border border-dashed border-line text-sm text-ink/60">No photo</div>}
-            <Btn type="button" variant="secondary" onClick={() => setCamera(true)}><Camera className="h-5 w-5" /> {photo ? "Retake with camera" : "Capture with camera"}</Btn>
+            {photo ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={photo} alt="Consent" className="h-24 w-36 rounded-lg border border-line object-cover" /> : <div className="flex h-24 w-36 items-center justify-center rounded-lg border border-dashed border-line text-sm text-ink/60">No photo yet</div>}
+            <div className="flex flex-wrap gap-2">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-navy hover:border-royal hover:text-royal">
+                Upload image
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = () => set("consentPhoto", reader.result as string);
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                />
+              </label>
+              <Btn type="button" variant="secondary" onClick={() => setCamera(true)}><Camera className="h-5 w-5" /> {photo ? "Retake camera" : "Capture camera"}</Btn>
+            </div>
           </div>
         </div>
       </div>
@@ -288,13 +305,13 @@ export function PatientsManager({ mode, patients, cats, showArchived = false }: 
               <tbody className="divide-y divide-line">
                 {list.map((p) => (
                   <tr key={p.id} className="hover:bg-canvas/60">
-                    <td className="px-4 py-3"><button onClick={() => setOpenId(p.id)} className="text-left font-semibold text-royal hover:text-alert">{p.fullName}</button><p className="text-sm text-ink/65">{p.contactNumber} · {p.bloodGroup}</p></td>
+                    <td className="px-4 py-3"><button onClick={() => navigate(`/portal/patients/${p.id}`)} className="text-left font-semibold text-royal hover:text-alert">{p.fullName}</button><p className="text-sm text-ink/65">{p.contactNumber} · {p.bloodGroup}</p></td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">{p.uhid}</td>
                     <td className="px-4 py-3 whitespace-nowrap">{p.age} · {p.gender.charAt(0)}</td>
                     <td className="px-4 py-3">{p.categoryName ? <Badge tone="blue">{p.categoryName}</Badge> : <span className="text-ink/50">—</span>}{mode === "DISCHARGED" && <span className="ml-1.5"><Badge>{p.patientType === "INPATIENT" ? "IP" : "OP"}</Badge></span>}</td>
                     <td className="px-4 py-3 whitespace-nowrap">{mode === "OUTPATIENT" ? formatDate(p.createdAt) : mode === "DISCHARGED" ? formatDate(p.dischargeDate) : p.roomBedNumber ?? "—"}</td>
                     <td className="px-4 py-3">{p.allergies.length ? <Badge tone="red">{p.allergies.length} allerg{p.allergies.length === 1 ? "y" : "ies"}</Badge> : <span className="text-ink/50">None</span>}</td>
-                    <td className="px-4 py-3 text-right"><Btn small variant="secondary" onClick={() => setOpenId(p.id)}><Stethoscope className="h-4 w-4" /> Open</Btn></td>
+                    <td className="px-4 py-3 text-right"><Btn small variant="secondary" onClick={() => navigate(`/portal/patients/${p.id}`)}><Stethoscope className="h-4 w-4" /> Open Profile</Btn></td>
                   </tr>
                 ))}
               </tbody>

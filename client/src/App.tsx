@@ -24,6 +24,7 @@ import DashboardPage from "@/pages/portal/Dashboard";
 import AppointmentsPage from "@/pages/portal/Appointments";
 import InpatientsPage from "@/pages/portal/Inpatients";
 import OutpatientsPage from "@/pages/portal/Outpatients";
+import PatientProfilePage from "@/pages/portal/PatientProfile";
 import DischargedPage from "@/pages/portal/Discharged";
 import DiagnosisCategoriesPage from "@/pages/portal/DiagnosisCategories";
 import BloodBankPage from "@/pages/portal/BloodBank";
@@ -98,6 +99,7 @@ export default function App() {
           <Route path="appointments" element={<AppointmentsPage />} />
           <Route path="inpatients" element={<InpatientsPage />} />
           <Route path="outpatients" element={<OutpatientsPage />} />
+          <Route path="patients/:id" element={<PatientProfilePage />} />
           <Route path="discharged-patients" element={<DischargedPage />} />
           <Route path="diagnosis-categories" element={<DiagnosisCategoriesPage />} />
           <Route path="blood-bank" element={<BloodBankPage />} />

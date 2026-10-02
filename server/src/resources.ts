@@ -11,6 +11,14 @@ import { computeMonthlyPayroll, daysInMonth } from "./payroll.js";
 import { phoneDigits } from "./utils.js";
 import { updateCachedSettings, DEFAULT_SETTINGS } from "./settings.js";
 import { updateInMemoryBloodStock } from "./content.js";
+import {
+  createPatientRecord,
+  updatePatientRecord,
+  dischargePatientRecord,
+  archivePatientRecord,
+  addVitalLog,
+  getPatientById,
+} from "./emr.js";
 
 export class ApiError extends Error {
   constructor(message: string, public status = 400) {
@@ -54,14 +62,15 @@ const uniqueViolation = (e: unknown) => {
 export const BLOOD_GROUPS = ["O+ve", "O-ve", "A+ve", "A-ve", "B+ve", "B-ve", "AB+ve", "AB-ve", "Unknown"] as const;
 
 async function saveConsentPhoto(dataUrl: string): Promise<string> {
-  const m = /^data:image\/(png|jpeg|webp);base64,(.+)$/.exec(dataUrl);
+  if (dataUrl.startsWith("/api/") || dataUrl.startsWith("http")) return dataUrl;
+  const m = /^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/.exec(dataUrl);
   if (!m) throw new ApiError("Invalid consent photo");
   const buf = Buffer.from(m[2], "base64");
   if (buf.length > 8 * 1024 * 1024) throw new ApiError("Consent photo is too large");
   const out = await sharp(buf)
     .rotate()
     .resize({ width: 1280, height: 1280, fit: "inside", withoutEnlargement: true })
-    .webp({ quality: 85 })
+    .webp({ quality: 85, effort: 2 })
     .toBuffer();
   const name = `${crypto.randomUUID()}.webp`;
   const dir = path.join(PRIVATE_DIR, "consent");
@@ -117,112 +126,113 @@ const patients: Handler = {
     if (phoneDigits(contact).length < 10) throw new ApiError("Enter a valid contact number");
     const consent = body.consentPhoto ? await saveConsentPhoto(String(body.consentPhoto)) : null;
     const room = patientType === "INPATIENT" ? req(body.roomBedNumber, "Room / bed number", 40) : null;
-    const created = await prisma.$transaction(async (tx) => {
-      const c = await tx.patient.count();
-      let uhid = `RH-${new Date().getFullYear()}-${String(c + 1).padStart(4, "0")}`;
-      const dupe = await tx.patient.findUnique({ where: { uhid } });
-      if (dupe) uhid += `-${Math.floor(Math.random() * 900 + 100)}`;
-      const p = await tx.patient.create({
-        data: {
-          uhid,
-          fullName: encryptField(req(body.fullName, "Full name", 120, 2)),
-          contactNumber: encryptField(contact),
-          age: num(body.age, "Age", { min: 0, max: 120 })!,
-          gender: oneOf(body.gender, ["MALE", "FEMALE", "OTHER"] as const, "gender"),
-          bloodGroup: oneOf(body.bloodGroup, BLOOD_GROUPS, "blood group"),
-          patientType,
-          clinicalCondition: encryptField(str(body.clinicalCondition, 4000)),
-          allergies: encryptJson(cleanAllergies(body.allergies)),
-          consentPhotoUrl: consent,
-          categoryId: str(body.categoryId, 60) || null,
-        },
-      });
-      if (room) await tx.inpatientStay.create({ data: { patientId: p.id, roomBedNumber: room } });
-      return p;
+    const fullName = req(body.fullName, "Full name", 120, 2);
+    const age = num(body.age, "Age", { min: 0, max: 120 })!;
+    const gender = oneOf(body.gender, ["MALE", "FEMALE", "OTHER"] as const, "gender");
+    const bloodGroup = oneOf(body.bloodGroup, BLOOD_GROUPS, "blood group");
+    const clinicalCondition = str(body.clinicalCondition, 4000) || "";
+    const allergies = cleanAllergies(body.allergies);
+    const categoryId = str(body.categoryId, 60) || null;
+
+    const res = await createPatientRecord({
+      patientType,
+      fullName,
+      contactNumber: contact,
+      age,
+      gender,
+      bloodGroup,
+      clinicalCondition,
+      allergies,
+      consentPhotoUrl: consent,
+      categoryId,
+      roomBedNumber: room,
     });
-    await audit(user, patientType === "INPATIENT" ? "ADMIT_PATIENT" : "REGISTER_OP", "Patient", created.id, created.uhid);
-    return { id: created.id, uhid: created.uhid };
+
+    await audit(user, patientType === "INPATIENT" ? "ADMIT_PATIENT" : "REGISTER_OP", "Patient", res.id, res.uhid);
+    return res;
   },
   async update({ user, body, id }) {
-    const set: Record<string, unknown> = {};
-    if (body.fullName !== undefined) set.fullName = encryptField(req(body.fullName, "Full name", 120, 2));
+    const p = await getPatientById(id!);
+    if (!p) throw new ApiError("Patient not found", 404);
+
+    const updateData: Parameters<typeof updatePatientRecord>[1] = {};
+    if (body.fullName !== undefined) updateData.fullName = req(body.fullName, "Full name", 120, 2);
     if (body.contactNumber !== undefined) {
       const c = req(body.contactNumber, "Contact number", 30);
       if (phoneDigits(c).length < 10) throw new ApiError("Enter a valid contact number");
-      set.contactNumber = encryptField(c);
+      updateData.contactNumber = c;
     }
-    if (body.age !== undefined) set.age = num(body.age, "Age", { min: 0, max: 120 })!;
-    if (body.gender !== undefined) set.gender = oneOf(body.gender, ["MALE", "FEMALE", "OTHER"] as const, "gender");
-    if (body.bloodGroup !== undefined) set.bloodGroup = oneOf(body.bloodGroup, BLOOD_GROUPS, "blood group");
-    if (body.clinicalCondition !== undefined) set.clinicalCondition = encryptField(str(body.clinicalCondition, 4000));
-    if (body.allergies !== undefined) set.allergies = encryptJson(cleanAllergies(body.allergies));
-    if (body.categoryId !== undefined) set.categoryId = str(body.categoryId, 60) || null;
-    if (body.consentPhoto) set.consentPhotoUrl = await saveConsentPhoto(String(body.consentPhoto));
-    await prisma.$transaction(async (tx) => {
-      if (Object.keys(set).length) await tx.patient.update({ where: { id: id! }, data: set as never });
-      if (body.roomBedNumber !== undefined) {
-        const room = str(body.roomBedNumber, 40);
-        if (room) {
-          await tx.inpatientStay.updateMany({ where: { patientId: id!, status: "ADMITTED" }, data: { roomBedNumber: room } });
-        }
-      }
-    });
+    if (body.age !== undefined) updateData.age = num(body.age, "Age", { min: 0, max: 120 })!;
+    if (body.gender !== undefined) updateData.gender = oneOf(body.gender, ["MALE", "FEMALE", "OTHER"] as const, "gender");
+    if (body.bloodGroup !== undefined) updateData.bloodGroup = oneOf(body.bloodGroup, BLOOD_GROUPS, "blood group");
+    if (body.clinicalCondition !== undefined) updateData.clinicalCondition = str(body.clinicalCondition, 4000) || "";
+    if (body.allergies !== undefined) updateData.allergies = cleanAllergies(body.allergies);
+    if (body.categoryId !== undefined) updateData.categoryId = str(body.categoryId, 60) || null;
+    if (body.consentPhoto) updateData.consentPhotoUrl = await saveConsentPhoto(String(body.consentPhoto));
+    if (body.roomBedNumber !== undefined) updateData.roomBedNumber = str(body.roomBedNumber, 40) || null;
+
+    await updatePatientRecord(id!, updateData);
     await audit(user, "UPDATE_PATIENT", "Patient", id, "EMR record edited");
     return { ok: true };
   },
   async remove({ user, id }) {
-    await prisma.patient.update({ where: { id: id! }, data: { isArchived: true } });
+    const p = await getPatientById(id!);
+    if (!p) throw new ApiError("Patient not found", 404);
+    await archivePatientRecord(id!, true);
     await audit(user, "ARCHIVE_PATIENT", "Patient", id, "Soft-removed from active lists");
     return { ok: true };
   },
   actions: {
     async discharge({ user, body, id }) {
-      await prisma.$transaction(async (tx) => {
-        const p = await tx.patient.findUnique({ where: { id: id! } });
-        if (!p) throw new ApiError("Patient not found", 404);
-        await tx.patient.update({ where: { id: id! }, data: { isDischarged: true } });
-        await tx.inpatientStay.updateMany({
-          where: { patientId: id!, status: "ADMITTED" },
-          data: {
-            status: "DISCHARGED",
-            dischargeDate: new Date(),
-            dischargeNotes: body.notes ? encryptField(str(body.notes, 3000)) : null,
-          },
-        });
-      });
+      const p = await getPatientById(id!);
+      if (!p) throw new ApiError("Patient not found", 404);
+      await dischargePatientRecord(id!, body.notes ? str(body.notes, 3000) : undefined);
       await audit(user, "DISCHARGE_PATIENT", "Patient", id);
       return { ok: true };
     },
     async unarchive({ user, id }) {
-      await prisma.patient.update({ where: { id: id! }, data: { isArchived: false } });
+      const p = await getPatientById(id!);
+      if (!p) throw new ApiError("Patient not found", 404);
+      await archivePatientRecord(id!, false);
       await audit(user, "RESTORE_PATIENT", "Patient", id);
       return { ok: true };
     },
     async archive({ user, id }) {
-      await prisma.patient.update({ where: { id: id! }, data: { isArchived: true } });
+      const p = await getPatientById(id!);
+      if (!p) throw new ApiError("Patient not found", 404);
+      await archivePatientRecord(id!, true);
       await audit(user, "ARCHIVE_PATIENT", "Patient", id);
       return { ok: true };
     },
     async vitals({ user, body, id }) {
-      const p = await prisma.patient.findUnique({ where: { id: id! } });
+      const p = await getPatientById(id!);
       if (!p) throw new ApiError("Patient not found", 404);
-      await prisma.vitalLog.create({
-        data: {
-          patientId: id!,
-          recordedAt: body.recordedAt ? new Date(body.recordedAt) : new Date(),
-          haemoglobin: num(body.haemoglobin, "Haemoglobin", { min: 1, max: 25 })!,
-          spO2: num(body.spO2, "SpO2", { min: 50, max: 100 })!,
-          pulse: num(body.pulse, "Pulse", { min: 20, max: 250 })!,
-          fastingGlucose: num(body.fastingGlucose, "Fasting glucose", { min: 10, max: 900, optional: true }),
-          postPrandialGlucose: num(body.postPrandialGlucose, "PP glucose", { min: 10, max: 900, optional: true }),
-          hbA1c: num(body.hbA1c, "HbA1c", { min: 2, max: 20, optional: true }),
-          bpSystolic: num(body.bpSystolic, "Systolic BP", { min: 40, max: 300 })!,
-          bpDiastolic: num(body.bpDiastolic, "Diastolic BP", { min: 20, max: 200 })!,
-          serumFerritin: num(body.serumFerritin, "Serum ferritin", { min: 0, max: 100000, optional: true }),
-          clinicalNotes: body.clinicalNotes ? encryptField(str(body.clinicalNotes, 2000)) : null,
-          recordedByStaff: user.fullName,
-        },
+      const hb = num(body.haemoglobin, "Haemoglobin", { min: 1, max: 25 });
+      const spO2 = num(body.spO2, "SpO2", { min: 50, max: 100 });
+      const pulse = num(body.pulse, "Pulse", { min: 20, max: 250 });
+      const bpSys = num(body.bpSystolic, "Systolic BP", { min: 40, max: 300 });
+      const bpDia = num(body.bpDiastolic, "Diastolic BP", { min: 20, max: 200 });
+      const fg = num(body.fastingGlucose, "Fasting glucose", { min: 10, max: 900, optional: true });
+      const pp = num(body.postPrandialGlucose, "PP glucose", { min: 10, max: 900, optional: true });
+      const a1c = num(body.hbA1c, "HbA1c", { min: 2, max: 20, optional: true });
+      const ferr = num(body.serumFerritin, "Serum ferritin", { min: 0, max: 100000, optional: true });
+
+      await addVitalLog(id!, {
+        recordedAt: body.recordedAt ? new Date(body.recordedAt) : new Date(),
+        timeSlot: body.timeSlot ? String(body.timeSlot) : undefined,
+        haemoglobin: hb!,
+        spO2: spO2!,
+        pulse: pulse!,
+        fastingGlucose: fg,
+        postPrandialGlucose: pp,
+        hbA1c: a1c,
+        bpSystolic: bpSys!,
+        bpDiastolic: bpDia!,
+        serumFerritin: ferr,
+        clinicalNotes: body.clinicalNotes ? str(body.clinicalNotes, 2000) : undefined,
+        recordedByStaff: user.fullName,
       });
+
       await audit(user, "LOG_VITALS", "Patient", id);
       return { ok: true };
     },

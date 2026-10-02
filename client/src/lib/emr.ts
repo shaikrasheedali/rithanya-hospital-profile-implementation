@@ -1,6 +1,7 @@
 export type VitalDTO = {
   id: string;
   recordedAt: string;
+  timeSlot?: string | null;
   haemoglobin: number;
   spO2: number;
   pulse: number;

@@ -540,6 +540,125 @@ async function runClientFlowTests() {
     }
     console.log("✓ All 29 Portal Desks and Pages responded with 200 OK and valid data!");
 
+    // =========================================================================
+    // Test 15: EMR & PATIENT PROFILE WORKFLOW
+    // - Verify Lakshmi Devi (RH-P24020) and her longitudinal vitals & categories
+    // - Register patient without initial consent photo (guaranteed 200, never 500)
+    // - Upload consent photo later to patient profile
+    // - Log vitals with date, time, slot, Hb, SpO2, pulse, glucose, HbA1c, BP, ferritin
+    // - Verify detailed patient profile endpoint returns 200 OK
+    // =========================================================================
+    console.log("\n[Test 15] USER WORKFLOW: Comprehensive Patient Profile & Vitals Trajectory...");
+
+    // 15a. Verify Lakshmi Devi profile
+    const resLakshmi = await fetch(`${BASE}/api/portal/patients/pat-lakshmi-devi`, {
+      headers: { Cookie: cookieHeader },
+    });
+    assert.strictEqual(resLakshmi.status, 200, "Lakshmi Devi profile endpoint returned 200");
+    const dataLakshmi: any = await resLakshmi.json();
+    assert.ok(dataLakshmi.patient, "Patient object returned");
+    assert.strictEqual(dataLakshmi.patient.uhid, "RH-P24020", "UHID is RH-P24020");
+    assert.strictEqual(dataLakshmi.patient.fullName, "Lakshmi Devi", "Full name is Lakshmi Devi");
+    assert.ok(dataLakshmi.patient.vitals.length >= 4, "Lakshmi Devi has longitudinal vitals history");
+    const latestLakshmi = dataLakshmi.patient.vitals[dataLakshmi.patient.vitals.length - 1];
+    assert.strictEqual(latestLakshmi.haemoglobin, 9.2, "Haemoglobin is 9.2");
+    assert.strictEqual(latestLakshmi.spO2, 99, "SpO2 is 99");
+    assert.strictEqual(latestLakshmi.pulse, 76, "Pulse is 76");
+    assert.strictEqual(latestLakshmi.fastingGlucose, 98, "Fasting glucose is 98");
+    assert.strictEqual(latestLakshmi.postPrandialGlucose, 142, "PP glucose is 142");
+    assert.strictEqual(latestLakshmi.hbA1c, 6.8, "HbA1c is 6.8");
+    assert.strictEqual(latestLakshmi.serumFerritin, 1380, "Serum ferritin is 1380");
+    console.log("✓ Lakshmi Devi profile verified (RH-P24020, Hb: 9.2, SpO2: 99, PP: 142, Ferritin: 1380)");
+
+    // 15b. Register new patient without consent photo (verifies fix for 500 error)
+    console.log("[Test 15b] Registering patient without initial consent photo (fixes 500 error)...");
+    const tRegStart = performance.now();
+    const resRegPatient = await fetch(`${BASE}/api/portal/r/patients`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader,
+      },
+      body: JSON.stringify({
+        patientType: "OUTPATIENT",
+        fullName: "Smt. Kamala Kumari",
+        contactNumber: "9848011223",
+        age: 42,
+        gender: "FEMALE",
+        bloodGroup: "O+ve",
+        clinicalCondition: "Iron deficiency anemia with mild microcytosis",
+        allergies: ["Sulfa drugs"],
+        categoryId: "cat-blood-disorders",
+      }),
+    });
+    const tRegDuration = Math.round(performance.now() - tRegStart);
+    assert.strictEqual(resRegPatient.status, 200, "Patient registration returned 200 OK (no 500 on DB cooldown)");
+    const dataReg: any = await resRegPatient.json();
+    assert.ok(dataReg.data?.id, "New patient has ID");
+    const newPatId = dataReg.data.id;
+    console.log(`✓ Patient registered in ${tRegDuration}ms with ID: ${newPatId} and UHID: ${dataReg.data.uhid}`);
+
+    // 15c. Upload consent photo later to patient profile
+    console.log("[Test 15c] Uploading consent photo directly to patient profile...");
+    const consentPng = await sharp({
+      create: { width: 100, height: 100, channels: 3, background: { r: 0, g: 120, b: 200 } },
+    })
+      .png()
+      .toBuffer();
+    const consentBase64 = `data:image/png;base64,${consentPng.toString("base64")}`;
+
+    const resConsentUpdate = await fetch(`${BASE}/api/portal/r/patients/${newPatId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader,
+      },
+      body: JSON.stringify({
+        consentPhoto: consentBase64,
+      }),
+    });
+    assert.strictEqual(resConsentUpdate.status, 200, "Consent photo upload returned 200 OK");
+    console.log("✓ Consent photo uploaded and attached to profile later");
+
+    // 15d. Log vitals with date, time, slot, Hb, SpO2, pulse, glucose, HbA1c, BP, ferritin
+    console.log("[Test 15d] Logging vitals with all required fields...");
+    const resLogVitals = await fetch(`${BASE}/api/portal/r/patients/${newPatId}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader,
+      },
+      body: JSON.stringify({
+        action: "vitals",
+        recordedAt: "2026-10-02T10:00:00.000Z",
+        timeSlot: "Morning",
+        haemoglobin: 9.2,
+        spO2: 99,
+        pulse: 76,
+        fastingGlucose: 98,
+        postPrandialGlucose: 142,
+        hbA1c: 6.8,
+        bpSystolic: 120,
+        bpDiastolic: 80,
+        serumFerritin: 1380,
+        clinicalNotes: "Patient resting well; tolerance good.",
+      }),
+    });
+    assert.strictEqual(resLogVitals.status, 200, "Logging vitals returned 200 OK");
+    console.log("✓ Vitals logged successfully with full trajectory parameters");
+
+    // 15e. Fetch updated patient profile to verify all updates
+    const resGetUpdated = await fetch(`${BASE}/api/portal/patients/${newPatId}`, {
+      headers: { Cookie: cookieHeader },
+    });
+    assert.strictEqual(resGetUpdated.status, 200, "Fetch updated patient returned 200 OK");
+    const dataUpdated: any = await resGetUpdated.json();
+    assert.ok(dataUpdated.patient.consentPhotoUrl, "Patient has consent photo URL");
+    assert.strictEqual(dataUpdated.patient.vitals.length, 1, "Patient has recorded vitals");
+    assert.strictEqual(dataUpdated.patient.vitals[0].haemoglobin, 9.2, "Haemoglobin 9.2 recorded");
+    assert.strictEqual(dataUpdated.patient.vitals[0].hbA1c, 6.8, "HbA1c 6.8 recorded");
+    console.log("✓ Patient profile verified with consent photo & vitals logs!");
+
     // 11l. Performance & Throughput Benchmark (/api/public/home)
     console.log("\n[Test 11l] Benchmarking Public Home Response Latency...");
     const t0 = performance.now();
