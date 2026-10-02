@@ -1,7 +1,18 @@
-import { prisma } from "./db.js";
+import { prisma, isDbOnCooldown } from "./db.js";
 import { COLLECTIONS, type CollectionKey, type FieldDef } from "./collections.js";
 import { clearEntityMedia, setEntityMedia, withMedia, type EntityType } from "./media.js";
 import { sanitizeHtml, slugify } from "./utils.js";
+import {
+  FALLBACK_SPECIALTIES,
+  FALLBACK_TREATMENTS,
+  FALLBACK_SERVICES,
+  FALLBACK_DOCTORS,
+  FALLBACK_INSURANCE,
+  FALLBACK_GALLERY,
+  FALLBACK_TESTIMONIALS,
+  FALLBACK_BLOGS,
+  FALLBACK_PRODUCTS,
+} from "./fallbackData.js";
 
 export function isCollection(key: string): key is CollectionKey {
   return key in COLLECTIONS;
@@ -21,9 +32,30 @@ async function findMany(key: CollectionKey) {
   }
 }
 
+function getFallbackCollection(key: CollectionKey) {
+  switch (key) {
+    case "specialties": return FALLBACK_SPECIALTIES;
+    case "treatments": return FALLBACK_TREATMENTS;
+    case "services": return FALLBACK_SERVICES;
+    case "doctors": return FALLBACK_DOCTORS;
+    case "insurance": return FALLBACK_INSURANCE;
+    case "gallery": return FALLBACK_GALLERY;
+    case "blogs": return FALLBACK_BLOGS;
+    case "testimonials": return FALLBACK_TESTIMONIALS;
+    case "products": return FALLBACK_PRODUCTS;
+  }
+}
+
 export async function listCollection(key: CollectionKey) {
-  const rows = (await findMany(key)) as Array<{ id: string }>;
-  return withMedia(key as EntityType, rows);
+  if (!isDbOnCooldown()) {
+    try {
+      const rows = (await findMany(key)) as Array<{ id: string }>;
+      if (rows && rows.length) return await withMedia(key as EntityType, rows);
+    } catch (err) {
+      console.warn(`[cms] listCollection(${key}) failed, using fallback:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return getFallbackCollection(key);
 }
 
 function coerce(fields: FieldDef[], body: Record<string, unknown>, creating: boolean) {

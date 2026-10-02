@@ -191,7 +191,46 @@ async function runClientFlowTests() {
     const dataLogin: any = await resLogin.json();
     assert.strictEqual(dataLogin.ok, true, "Login successful");
     assert.strictEqual(dataLogin.role, "SUPERADMIN", "Role is SUPERADMIN");
-    console.log(`✓ Staff Login API passed (role: ${dataLogin.role})`);
+    // Cookie extraction for session verification
+    const setCookie = resLogin.headers.get("set-cookie") || "";
+    const cookieHeader = setCookie.split(";")[0] || "";
+
+    console.log("[Test 11b] Testing GET('/api/auth/me') with session cookie...");
+    const resMe = await fetch(`${BASE}/api/auth/me`, {
+      headers: { Cookie: cookieHeader },
+    });
+    assert.strictEqual(resMe.status, 200, "Auth /me returned 200");
+    const dataMe: any = await resMe.json();
+    assert.ok(dataMe.user && dataMe.user.role === "SUPERADMIN", "/me user role is SUPERADMIN");
+    console.log(`✓ Auth /me passed (user: ${dataMe.user.username}, role: ${dataMe.user.role})`);
+
+    console.log("[Test 11c] Testing Staff Auth by Email POST('/api/auth/login')...");
+    const resLoginEmail = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "superadmin@rithanyahospital.com",
+        password: "Rithanya@2026",
+      }),
+    });
+    assert.strictEqual(resLoginEmail.status, 200, "Superadmin email login returned 200");
+    const dataLoginEmail: any = await resLoginEmail.json();
+    assert.strictEqual(dataLoginEmail.ok, true, "Email login successful");
+    console.log("✓ Staff Email Login passed (superadmin@rithanyahospital.com)");
+
+    console.log("[Test 11d] Testing Invalid Credentials POST('/api/auth/login') returns 401 (never 503)...");
+    const resInvalid = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: "unknown_user",
+        password: "WrongPassword123!",
+      }),
+    });
+    assert.strictEqual(resInvalid.status, 401, "Invalid login returns 401");
+    const dataInvalid: any = await resInvalid.json();
+    assert.ok(dataInvalid.error, "Error message returned");
+    console.log(`✓ Invalid credentials correctly returned 401: "${dataInvalid.error}"`);
 
     // 12. Frontend SPA index & Navbar button ordering verification
     console.log("\n[Test 12] Testing Frontend SPA and Navbar ordering...");

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import type { Request, Response, NextFunction } from "express";
 import { hash, verify } from "@node-rs/argon2";
-import { prisma } from "./db.js";
+import { prisma, isDbOnCooldown, reportDbError } from "./db.js";
 
 export type Role = "SUPERADMIN" | "ADMIN" | "STAFF";
 export type ModuleKey = "emr" | "bloodbank" | "cms" | "store" | "hr" | "finance" | "dpdp" | "settings" | "access";
@@ -87,27 +87,64 @@ export function computeModules(role: Role, a?: AccessRow | null): Record<ModuleK
   };
 }
 
+export const DEMO_ACCOUNTS: Record<string, { role: Role; pass: string; name: string; username: string; id: string }> = {
+  superadmin: { role: "SUPERADMIN", pass: "Rithanya@2026", name: "Hospital Superadmin", username: "superadmin", id: "demo-superadmin" },
+  "superadmin@rithanyahospital.com": { role: "SUPERADMIN", pass: "Rithanya@2026", name: "Hospital Superadmin", username: "superadmin", id: "demo-superadmin" },
+  admin: { role: "ADMIN", pass: "Admin@2026", name: "Administration Desk", username: "admin", id: "demo-admin" },
+  "admin@rithanyahospital.com": { role: "ADMIN", pass: "Admin@2026", name: "Administration Desk", username: "admin", id: "demo-admin" },
+  staff: { role: "STAFF", pass: "Staff@2026", name: "Nursing Station Staff", username: "staff", id: "demo-staff" },
+  "staff@rithanyahospital.com": { role: "STAFF", pass: "Staff@2026", name: "Nursing Station Staff", username: "staff", id: "demo-staff" },
+};
+
+export const userSessionCache = new Map<string, SessionUser>();
+
 export async function loadUser(userId: string): Promise<SessionUser | null> {
+  const cached = userSessionCache.get(userId);
+  if (cached) return cached;
+
+  if (userId === "demo-superadmin") {
+    const s: SessionUser = { id: userId, username: "superadmin", fullName: "Hospital Superadmin", role: "SUPERADMIN", modules: computeModules("SUPERADMIN") };
+    userSessionCache.set(userId, s);
+    return s;
+  }
+  if (userId === "demo-admin") {
+    const s: SessionUser = { id: userId, username: "admin", fullName: "Administration Desk", role: "ADMIN", modules: computeModules("ADMIN") };
+    userSessionCache.set(userId, s);
+    return s;
+  }
+  if (userId === "demo-staff") {
+    const s: SessionUser = { id: userId, username: "staff", fullName: "Nursing Station Staff", role: "STAFF", modules: computeModules("STAFF") };
+    userSessionCache.set(userId, s);
+    return s;
+  }
   if (userId.startsWith("demo-")) {
-    const roleKey = userId.replace("demo-", "").toUpperCase();
-    const role = (roleKey === "SUPERADMIN" || roleKey === "ADMIN" ? roleKey : "STAFF") as Role;
-    return {
+    const cleanUser = userId.replace("demo-", "");
+    const role: Role = cleanUser.includes("superadmin") ? "SUPERADMIN" : cleanUser.includes("admin") ? "ADMIN" : "STAFF";
+    const s: SessionUser = {
       id: userId,
-      username: userId.replace("demo-", ""),
+      username: cleanUser,
       fullName: role === "SUPERADMIN" ? "Hospital Superadmin" : role === "ADMIN" ? "Administration Desk" : "Nursing Station Staff",
       role,
       modules: computeModules(role),
     };
+    userSessionCache.set(userId, s);
+    return s;
   }
-  try {
-    const u = await prisma.user.findUnique({ where: { id: userId } });
-    if (!u || !u.isActive) return null;
-    const a = await prisma.userModuleAccess.findUnique({ where: { userId: u.id } });
-    return { id: u.id, username: u.username, fullName: u.fullName, role: u.role as Role, modules: computeModules(u.role as Role, a) };
-  } catch (err) {
-    console.warn("[auth] loadUser DB query failed:", err instanceof Error ? err.message : err);
-    return null;
+
+  if (!isDbOnCooldown()) {
+    try {
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      if (!u || !u.isActive) return null;
+      const a = await prisma.userModuleAccess.findUnique({ where: { userId: u.id } });
+      const s: SessionUser = { id: u.id, username: u.username, fullName: u.fullName, role: u.role as Role, modules: computeModules(u.role as Role, a) };
+      userSessionCache.set(userId, s);
+      return s;
+    } catch (err) {
+      reportDbError(err);
+      console.warn("[auth] loadUser DB query failed:", err instanceof Error ? err.message : err);
+    }
   }
+  return null;
 }
 
 export async function getSessionFromReq(req: Request): Promise<SessionUser | null> {

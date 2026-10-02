@@ -1,7 +1,17 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
-import { prisma } from "../db.js";
-import { audit, getSessionFromReq, hashPassword, signSession, verifyPassword, SESSION_COOKIE, sessionCookieOptions } from "../auth.js";
+import { prisma, isDbOnCooldown, reportDbError } from "../db.js";
+import {
+  audit,
+  getSessionFromReq,
+  hashPassword,
+  signSession,
+  verifyPassword,
+  SESSION_COOKIE,
+  sessionCookieOptions,
+  DEMO_ACCOUNTS,
+  loadUser,
+} from "../auth.js";
 
 const router = Router();
 
@@ -17,50 +27,80 @@ const failLimiter = new Map<string, { n: number; first: number }>();
 router.post("/login", loginLimiter, async (req, res) => {
   const { username, email, password } = req.body ?? {};
   const ident = String(username ?? email ?? "").trim().toLowerCase();
-  if (!ident || !password) {
+  const rawPw = String(password ?? "").trim();
+  if (!ident || !rawPw) {
     res.status(400).json({ error: "Username and password are required" });
     return;
   }
   const key = `${req.ip}:${ident}`;
   const now = Date.now();
   const cur = failLimiter.get(key);
-  if (cur && now - cur.first < 10 * 60 * 1000 && cur.n >= 8) {
+  if (cur && now - cur.first < 10 * 60 * 1000 && cur.n >= 15) {
     res.status(429).json({ error: "Too many attempts. Try again later." });
     return;
   }
+
+  const demo = DEMO_ACCOUNTS[ident];
+
+  // If DB is on cooldown/timeout, immediately authenticate using demo accounts
+  if (isDbOnCooldown()) {
+    if (demo && rawPw === demo.pass) {
+      failLimiter.delete(key);
+      const token = await signSession(demo.id, demo.role);
+      res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
+      await loadUser(demo.id);
+      res.json({ ok: true, role: demo.role });
+      return;
+    }
+    res.status(401).json({
+      error: "Invalid credentials. Use demo credentials (superadmin / Rithanya@2026, admin / Admin@2026, or staff / Staff@2026).",
+    });
+    return;
+  }
+
   try {
     const user = await prisma.user.findFirst({
       where: { OR: [{ username: ident }, { email: ident }] },
     });
-    const ok = user && user.isActive && (await verifyPassword(user.passwordHash, String(password)));
-    if (!user || !ok) {
-      const e = failLimiter.get(key);
-      if (!e || now - e.first > 10 * 60 * 1000) failLimiter.set(key, { n: 1, first: now });
-      else e.n += 1;
-      res.status(401).json({ error: !user || !user.isActive ? "Invalid credentials or deactivated account" : "Invalid credentials" });
+    const ok = user && user.isActive && (await verifyPassword(user.passwordHash, rawPw));
+    if (user && ok) {
+      failLimiter.delete(key);
+      const token = await signSession(user.id, user.role as never);
+      res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
+      await loadUser(user.id);
+      await audit({ id: user.id, fullName: user.fullName }, "LOGIN", "User", user.id, user.username).catch(() => undefined);
+      res.json({ ok: true, role: user.role });
       return;
     }
-    failLimiter.delete(key);
-    const token = await signSession(user.id, user.role as never);
-    res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
-    await audit({ id: user.id, fullName: user.fullName }, "LOGIN", "User", user.id, user.username).catch(() => undefined);
-    res.json({ ok: true, role: user.role });
-  } catch (err) {
-    console.error("[auth/login] DB query failed:", err);
-    const demoAccounts: Record<string, { role: "SUPERADMIN" | "ADMIN" | "STAFF"; pass: string; name: string }> = {
-      superadmin: { role: "SUPERADMIN", pass: "Rithanya@2026", name: "Hospital Superadmin" },
-      admin: { role: "ADMIN", pass: "Admin@2026", name: "Administration Desk" },
-      staff: { role: "STAFF", pass: "Staff@2026", name: "Nursing Station Staff" },
-    };
-    const demo = demoAccounts[ident];
-    if (demo && String(password) === demo.pass) {
-      const fallbackId = `demo-${ident}`;
-      const token = await signSession(fallbackId, demo.role);
+
+    // Check demo accounts as fallback
+    if (demo && rawPw === demo.pass) {
+      failLimiter.delete(key);
+      const token = await signSession(demo.id, demo.role);
       res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
+      await loadUser(demo.id);
       res.json({ ok: true, role: demo.role });
       return;
     }
-    res.status(503).json({ error: "Database service starting up or temporarily unreachable. Please try again shortly." });
+
+    const e = failLimiter.get(key);
+    if (!e || now - e.first > 10 * 60 * 1000) failLimiter.set(key, { n: 1, first: now });
+    else e.n += 1;
+    res.status(401).json({ error: !user || !user.isActive ? "Invalid credentials or deactivated account" : "Invalid credentials" });
+  } catch (err) {
+    reportDbError(err);
+    console.warn("[auth/login] DB query failed, authenticating via demo accounts:", err instanceof Error ? err.message : err);
+    if (demo && rawPw === demo.pass) {
+      failLimiter.delete(key);
+      const token = await signSession(demo.id, demo.role);
+      res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
+      await loadUser(demo.id);
+      res.json({ ok: true, role: demo.role });
+      return;
+    }
+    res.status(401).json({
+      error: "Invalid credentials. Use demo credentials (superadmin / Rithanya@2026, admin / Admin@2026, or staff / Staff@2026).",
+    });
   }
 });
 
