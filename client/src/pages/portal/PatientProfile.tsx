@@ -585,7 +585,9 @@ export default function PatientProfilePage() {
       setPatient(data.patient);
       setAllergies(data.patient.allergies ?? []);
       setCondition(data.patient.clinicalCondition ?? "");
-      setSelectedCat(data.patient.categoryId ?? "");
+      const cats = data.categories ?? [];
+      const validCat = cats.some((c) => c.id === data.patient.categoryId);
+      setSelectedCat(validCat ? data.patient.categoryId ?? "" : "");
       document.title = `${data.patient.fullName} (${data.patient.uhid}) | Rithanya HMS`;
     }
     if (data?.categories) {
@@ -718,7 +720,10 @@ export default function PatientProfilePage() {
             </div>
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2.5">
-                <h1 className="font-heading text-2xl font-bold tracking-tight text-white sm:text-3xl">
+                <h1
+                  className="font-heading text-2xl font-bold tracking-tight text-white !text-white sm:text-3xl"
+                  style={{ color: "#ffffff" }}
+                >
                   {patient.fullName}
                 </h1>
                 <span className="rounded-full bg-white/20 px-3 py-0.5 text-xs font-mono font-bold tracking-wide text-yellow-300">
@@ -1020,7 +1025,14 @@ export default function PatientProfilePage() {
               </div>
 
               <div className="pt-2">
-                <Field label="Assigned Diagnosis Category">
+                <Field
+                  label="Assigned Diagnosis Category"
+                  help={
+                    categories.length === 0
+                      ? "No diagnosis categories defined yet. Add categories in Portal > Diagnosis Categories."
+                      : "Select from the hospital's registered diagnosis categories."
+                  }
+                >
                   <select
                     className={inputCls}
                     value={selectedCat}

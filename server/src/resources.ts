@@ -16,9 +16,34 @@ import {
   updatePatientRecord,
   dischargePatientRecord,
   archivePatientRecord,
+  deletePatientRecord,
   addVitalLog,
   getPatientById,
+  createClinicalCategory,
+  updateClinicalCategory,
+  deleteClinicalCategory,
 } from "./emr.js";
+import { updateOrderStatus } from "./orders.js";
+import {
+  createEmployeeRecord,
+  updateEmployeeRecord,
+  deleteEmployeeRecord,
+  toggleEmployeeRecord,
+} from "./employees.js";
+import {
+  createExpenseCategoryRecord,
+  updateExpenseCategoryRecord,
+  deleteExpenseCategoryRecord,
+  createLedgerEntryRecord,
+  updateLedgerEntryRecord,
+  deleteLedgerEntryRecord,
+} from "./finance.js";
+import {
+  createUserRecord,
+  updateUserRecord,
+  deleteUserRecord,
+  updatePermissionsRecord,
+} from "./users.js";
 
 export class ApiError extends Error {
   constructor(message: string, public status = 400) {
@@ -88,31 +113,32 @@ const categories: Handler = {
   module: "emr",
   async create({ user, body }) {
     try {
-      const row = await prisma.clinicalCategory.create({
-        data: { name: req(body.name, "Category name", 160), description: str(body.description, 600) || null },
-      });
+      const name = req(body.name, "Category name", 160);
+      const row = await createClinicalCategory({ name, description: str(body.description, 600) || null });
       await audit(user, "CREATE_CATEGORY", "ClinicalCategory", row.id, row.name);
       return row;
-    } catch (e) {
-      if (uniqueViolation(e)) throw new ApiError("A category with this name already exists", 409);
+    } catch (e: any) {
+      if (uniqueViolation(e) || e?.status === 409 || e?.message?.includes("already exists")) {
+        throw new ApiError("A category with this name already exists", 409);
+      }
       throw e;
     }
   },
   async update({ user, body, id }) {
     try {
-      const row = await prisma.clinicalCategory.update({
-        where: { id: id! },
-        data: { name: req(body.name, "Category name", 160), description: str(body.description, 600) || null },
-      });
+      const name = req(body.name, "Category name", 160);
+      const row = await updateClinicalCategory(id!, { name, description: str(body.description, 600) || null });
       await audit(user, "UPDATE_CATEGORY", "ClinicalCategory", id, row?.name);
       return row;
-    } catch (e) {
-      if (uniqueViolation(e)) throw new ApiError("A category with this name already exists", 409);
+    } catch (e: any) {
+      if (uniqueViolation(e) || e?.status === 409 || e?.message?.includes("already exists")) {
+        throw new ApiError("A category with this name already exists", 409);
+      }
       throw e;
     }
   },
   async remove({ user, id }) {
-    await prisma.clinicalCategory.delete({ where: { id: id! } });
+    await deleteClinicalCategory(id!);
     await audit(user, "DELETE_CATEGORY", "ClinicalCategory", id);
     return { ok: true };
   },
@@ -178,8 +204,8 @@ const patients: Handler = {
   async remove({ user, id }) {
     const p = await getPatientById(id!);
     if (!p) throw new ApiError("Patient not found", 404);
-    await archivePatientRecord(id!, true);
-    await audit(user, "ARCHIVE_PATIENT", "Patient", id, "Soft-removed from active lists");
+    await deletePatientRecord(id!);
+    await audit(user, "DELETE_PATIENT", "Patient", id, p.uhid);
     return { ok: true };
   },
   actions: {
@@ -283,22 +309,12 @@ const orders: Handler = {
   module: "store",
   async update({ user, body, id }) {
     const status = oneOf(body.status, ["PENDING", "PAID", "PROCESSING", "DISPATCHED", "DELIVERED", "CANCELLED"] as const, "status");
-    await prisma.$transaction(async (tx) => {
-      const o = await tx.order.findUnique({ where: { id: id! } });
-      if (!o) throw new ApiError("Order not found", 404);
-      if (o.status === "CANCELLED" && status !== "CANCELLED") throw new ApiError("A cancelled order cannot be reopened");
-      if (status === "CANCELLED" && o.status !== "CANCELLED") {
-        const items = await tx.orderItem.findMany({ where: { orderId: id! } });
-        for (const it of items) {
-          const prod = await tx.product.findUnique({ where: { id: it.productId } });
-          if (prod) await tx.product.update({ where: { id: it.productId }, data: { stockUnits: prod.stockUnits + it.quantity } });
-        }
-      }
-      await tx.order.update({
-        where: { id: id! },
-        data: { status, isPaid: status === "CANCELLED" ? o.isPaid : ["PAID", "PROCESSING", "DISPATCHED", "DELIVERED"].includes(status) || o.isPaid },
-      });
-    });
+    try {
+      await updateOrderStatus(id!, status);
+    } catch (e: any) {
+      if (e?.message === "Order not found") throw new ApiError("Order not found", 404);
+      throw new ApiError(e?.message || "Order update failed", 400);
+    }
     await audit(user, "ORDER_STATUS", "Order", id, status);
     return { ok: true };
   },
@@ -320,27 +336,27 @@ function employeeValues(b: Record<string, any>, defaultEntity?: string) {
 const employees: Handler = {
   module: "hr",
   async create({ user, body, entity }) {
-    const row = await prisma.employee.create({ data: employeeValues(body, entity) as never });
+    const vals = employeeValues(body, entity);
+    const row = await createEmployeeRecord(vals);
     await audit(user, "CREATE_EMPLOYEE", "Employee", row.id, row.fullName);
     return row;
   },
   async update({ user, body, id, entity }) {
-    const row = await prisma.employee.update({ where: { id: id! }, data: employeeValues(body, entity) as never });
+    const vals = employeeValues(body, entity);
+    const row = await updateEmployeeRecord(id!, vals);
     await audit(user, "UPDATE_EMPLOYEE", "Employee", id, row?.fullName);
     return row;
   },
   async remove({ user, id }) {
-    await prisma.employee.delete({ where: { id: id! } });
+    await deleteEmployeeRecord(id!);
     await audit(user, "DELETE_EMPLOYEE", "Employee", id);
     return { ok: true };
   },
   actions: {
     async toggle({ user, id }) {
-      const e = await prisma.employee.findUnique({ where: { id: id! } });
-      if (!e) throw new ApiError("Employee not found", 404);
-      await prisma.employee.update({ where: { id: id! }, data: { isActive: !e.isActive } });
+      const row = await toggleEmployeeRecord(id!);
       await audit(user, "TOGGLE_EMPLOYEE", "Employee", id);
-      return { ok: true };
+      return row;
     },
   },
 };
@@ -412,31 +428,39 @@ const expenseCategories: Handler = {
   async create({ user, body, entity }) {
     try {
       const ent = oneOf(body.entity ?? entity ?? "RITHANYA_HOSPITAL", ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity");
-      const row = await prisma.expenseCategory.create({
-        data: { entity: ent, name: req(body.name, "Category name", 120), description: str(body.description, 400) || null },
+      const row = await createExpenseCategoryRecord({
+        entity: ent,
+        name: req(body.name, "Category name", 120),
+        description: str(body.description, 400) || null,
       });
       await audit(user, "CREATE_EXPENSE_CATEGORY", "ExpenseCategory", row.id, `${row.name} (${ent})`);
       return row;
-    } catch (e) {
-      if (uniqueViolation(e)) throw new ApiError("Category already exists", 409);
+    } catch (e: any) {
+      if (uniqueViolation(e) || e?.status === 409 || e?.message?.includes("already exists")) {
+        throw new ApiError("Category already exists", 409);
+      }
       throw e;
     }
   },
   async update({ user, body, id, entity }) {
-    const data: Record<string, any> = {
-      name: req(body.name, "Category name", 120),
-      description: str(body.description, 400) || null,
-    };
-    if (body.entity || entity) data.entity = oneOf(body.entity ?? entity, ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity");
-    const row = await prisma.expenseCategory.update({
-      where: { id: id! },
-      data,
-    });
-    await audit(user, "UPDATE_EXPENSE_CATEGORY", "ExpenseCategory", id);
-    return row;
+    try {
+      const data: Record<string, any> = {
+        name: req(body.name, "Category name", 120),
+        description: str(body.description, 400) || null,
+      };
+      if (body.entity || entity) data.entity = oneOf(body.entity ?? entity, ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity");
+      const row = await updateExpenseCategoryRecord(id!, data);
+      await audit(user, "UPDATE_EXPENSE_CATEGORY", "ExpenseCategory", id);
+      return row;
+    } catch (e: any) {
+      if (uniqueViolation(e) || e?.status === 409 || e?.message?.includes("already exists")) {
+        throw new ApiError("Category already exists", 409);
+      }
+      throw e;
+    }
   },
   async remove({ user, id }) {
-    await prisma.expenseCategory.delete({ where: { id: id! } });
+    await deleteExpenseCategoryRecord(id!);
     await audit(user, "DELETE_EXPENSE_CATEGORY", "ExpenseCategory", id);
     return { ok: true };
   },
@@ -453,24 +477,26 @@ function ledgerValues(b: Record<string, any>, defaultEntity?: string) {
     amount: num(b.amount, "Amount", { min: 0.01, max: 1e10 })!,
     invoiceRef: str(b.invoiceRef, 80) || null,
     method: oneOf(b.method, ["Cash", "UPI", "NEFT", "Cheque"] as const, "payment mode"),
-    entryDate: b.entryDate ? new Date(b.entryDate) : new Date(),
+    entryDate: (b.entryDate ? new Date(b.entryDate) : new Date()).toISOString(),
   };
 }
 
 const ledger: Handler = {
   module: "finance",
   async create({ user, body, entity }) {
-    const row = await prisma.expenseLedger.create({ data: ledgerValues(body, entity) as never });
+    const vals = ledgerValues(body, entity);
+    const row = await createLedgerEntryRecord(vals);
     await audit(user, "LEDGER_ENTRY", "ExpenseLedger", row.id, `${row.type} ${row.amount} ${row.itemName}`);
     return row;
   },
   async update({ user, body, id, entity }) {
-    const row = await prisma.expenseLedger.update({ where: { id: id! }, data: ledgerValues(body, entity) as never });
+    const vals = ledgerValues(body, entity);
+    const row = await updateLedgerEntryRecord(id!, vals);
     await audit(user, "LEDGER_UPDATE", "ExpenseLedger", id);
     return row;
   },
   async remove({ user, id }) {
-    await prisma.expenseLedger.delete({ where: { id: id! } });
+    await deleteLedgerEntryRecord(id!);
     await audit(user, "LEDGER_DELETE", "ExpenseLedger", id);
     return { ok: true };
   },
@@ -580,88 +606,51 @@ async function writeAccess(tx: any, userId: string, role: Role, mods?: Record<st
 const users: Handler = {
   module: "access",
   async create({ user, body }) {
-    const role = oneOf(body.role, ["SUPERADMIN", "ADMIN", "STAFF"] as const, "role");
-    if (role === "SUPERADMIN" && user.role !== "SUPERADMIN") throw new ApiError("Only a Superadmin can create a Superadmin", 403);
-    await assertCanManage(user, role);
-    const password = String(body.password ?? "");
-    if (password.length < 8) throw new ApiError("Password must be at least 8 characters");
     try {
-      const passwordHash = await hashPassword(password);
-      const row = await prisma.$transaction(async (tx) => {
-        const u = await tx.user.create({
-          data: {
-            username: req(body.username, "Username", 80, 3).toLowerCase().replace(/\s+/g, ""),
-            email: req(body.email, "Email", 200).toLowerCase(),
-            fullName: req(body.fullName, "Full name", 120),
-            role,
-            passwordHash,
-            createdById: user.id,
-          },
-        });
-        await writeAccess(tx, u.id, role);
-        return u;
-      });
-      await audit(user, "CREATE_USER", "User", row.id, `${row.username} (${role})`);
-      return { id: row.id };
-    } catch (e) {
-      if (uniqueViolation(e)) throw new ApiError("Username or email already in use", 409);
+      const row = await createUserRecord(user, body);
+      await audit(user, "CREATE_USER", "User", row.id, `${String(body.username)} (${String(body.role)})`);
+      return row;
+    } catch (e: any) {
+      if (e?.status) throw new ApiError(e.message, e.status);
+      if (uniqueViolation(e) || e?.message?.includes("already in use")) throw new ApiError("Username or email already in use", 409);
       throw e;
     }
   },
   async update({ user, body, id }) {
-    const target = await prisma.user.findUnique({ where: { id: id! } });
-    if (!target) throw new ApiError("User not found", 404);
-    await assertCanManage(user, target.role as Role, id);
-    if (id === user.id && body.isActive === false) throw new ApiError("You cannot deactivate your own account");
-    const set: Record<string, unknown> = {};
-    if (body.fullName !== undefined) set.fullName = req(body.fullName, "Full name", 120);
-    if (body.email !== undefined) set.email = req(body.email, "Email", 200).toLowerCase();
-    if (body.isActive !== undefined) set.isActive = Boolean(body.isActive);
-    if (body.role !== undefined && body.role !== target.role) {
-      const role = oneOf(body.role, ["SUPERADMIN", "ADMIN", "STAFF"] as const, "role");
-      if (id === user.id) throw new ApiError("You cannot change your own role");
-      if (user.role !== "SUPERADMIN") throw new ApiError("Only a Superadmin can change roles", 403);
-      set.role = role;
-    }
-    if (body.password) {
-      if (String(body.password).length < 8) throw new ApiError("Password must be at least 8 characters");
-      set.passwordHash = await hashPassword(String(body.password));
-    }
     try {
-      await prisma.$transaction(async (tx) => {
-        await tx.user.update({ where: { id: id! }, data: set as never });
-        if (set.role) await writeAccess(tx, id!, set.role as Role);
-      });
-    } catch (e) {
-      if (uniqueViolation(e)) throw new ApiError("Email already in use", 409);
+      await updateUserRecord(user, id!, body);
+      await audit(user, body.password ? "RESET_PASSWORD" : "UPDATE_USER", "User", id, "User updated");
+      return { ok: true };
+    } catch (e: any) {
+      if (e?.status) throw new ApiError(e.message, e.status);
+      if (uniqueViolation(e) || e?.message?.includes("already in use")) throw new ApiError("Email already in use", 409);
       throw e;
     }
-    await audit(user, body.password ? "RESET_PASSWORD" : "UPDATE_USER", "User", id, target.username);
-    return { ok: true };
   },
   async remove({ user, id }) {
-    if (id === user.id) throw new ApiError("You cannot delete your own account");
-    const target = await prisma.user.findUnique({ where: { id: id! } });
-    if (!target) throw new ApiError("User not found", 404);
-    await assertCanManage(user, target.role as Role);
-    await prisma.user.delete({ where: { id: id! } });
-    await audit(user, "DELETE_USER", "User", id, target.username);
-    return { ok: true };
+    try {
+      await deleteUserRecord(user, id!);
+      await audit(user, "DELETE_USER", "User", id);
+      return { ok: true };
+    } catch (e: any) {
+      if (e?.status) throw new ApiError(e.message, e.status);
+      throw e;
+    }
   },
 };
 
 const permissions: Handler = {
   module: "access",
   async update({ user, body, id }) {
-    const target = await prisma.user.findUnique({ where: { id: id! } });
-    if (!target) throw new ApiError("User not found", 404);
-    if (target.role === "SUPERADMIN") throw new ApiError("Superadmin permissions are fixed", 403);
-    await assertCanManage(user, target.role as Role);
-    if (id === user.id) throw new ApiError("You cannot edit your own permissions", 403);
-    const mods = (body.modules ?? {}) as Record<string, boolean>;
-    await prisma.$transaction(async (tx) => writeAccess(tx, id!, target.role as Role, mods));
-    await audit(user, "UPDATE_PERMISSIONS", "User", id, target.username);
-    return { ok: true };
+    try {
+      const mods = (body.modules ?? {}) as Record<string, boolean>;
+      await updatePermissionsRecord(user, id!, mods);
+      await audit(user, "UPDATE_PERMISSIONS", "User", id);
+      return { ok: true };
+    } catch (e: any) {
+      if (e?.status) throw new ApiError(e.message, e.status);
+      throw e;
+    }
   },
 };
 

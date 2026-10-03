@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { prisma } from "./db.js";
+import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
 import { hashPassword, computeModules } from "./auth.js";
 import { encryptField, encryptJson } from "./crypto.js";
 import { setEntityMedia, registerAssetInMemory, type EntityType } from "./media.js";
@@ -115,42 +115,60 @@ async function put(
 }
 
 export async function ensureBaseData() {
-  await prisma.hospitalSetting.upsert({
-    where: { id: "PRIMARY_CONFIG" },
-    create: { ...DEFAULT_SETTINGS, socialShareThumbnailUrl: "/seed/hospital-corridor.webp" },
-    update: {},
-  });
-  const colors: Record<string, string> = { O: "SKY_BLUE", A: "YELLOW", B: "RED", AB: "WHITE" };
-  const seedStock: Record<string, [number, number, string]> = {
-    "O+": [14, 9, "O"],
-    "O-": [8, 5, "O"],
-    "A+": [11, 7, "A"],
-    "A-": [6, 4, "A"],
-    "B+": [9, 6, "B"],
-    "B-": [5, 3, "B"],
-    "AB+": [4, 3, "AB"],
-    "AB-": [2, 2, "AB"],
-    "O": [14, 9, "O"],
-    "A": [11, 7, "A"],
-    "B": [9, 6, "B"],
-    "AB": [4, 3, "AB"],
-  };
-  for (const [g, [wb, pl, cat]] of Object.entries(seedStock)) {
-    try {
-      await prisma.bloodStock.upsert({
-        where: { bloodGroup: g },
-        create: { bloodGroup: g, groupCategory: cat, colorCode: colors[cat], wholeBloodUnits: wb, plasmaUnits: pl },
+  if (isDbOnCooldown()) return;
+  try {
+    await withDbTimeout(
+      prisma.hospitalSetting.upsert({
+        where: { id: "PRIMARY_CONFIG" },
+        create: { ...DEFAULT_SETTINGS, socialShareThumbnailUrl: "/seed/hospital-corridor.webp" },
         update: {},
-      });
-    } catch {
-      // ignore
+      }),
+      2500
+    );
+    const colors: Record<string, string> = { O: "SKY_BLUE", A: "YELLOW", B: "RED", AB: "WHITE" };
+    const seedStock: Record<string, [number, number, string]> = {
+      "O+": [14, 9, "O"],
+      "O-": [8, 5, "O"],
+      "A+": [11, 7, "A"],
+      "A-": [6, 4, "A"],
+      "B+": [9, 6, "B"],
+      "B-": [5, 3, "B"],
+      "AB+": [4, 3, "AB"],
+      "AB-": [2, 2, "AB"],
+      "O": [14, 9, "O"],
+      "A": [11, 7, "A"],
+      "B": [9, 6, "B"],
+      "AB": [4, 3, "AB"],
+    };
+    for (const [g, [wb, pl, cat]] of Object.entries(seedStock)) {
+      try {
+        await withDbTimeout(
+          prisma.bloodStock.upsert({
+            where: { bloodGroup: g },
+            create: { bloodGroup: g, groupCategory: cat, colorCode: colors[cat], wholeBloodUnits: wb, plasmaUnits: pl },
+            update: {},
+          }),
+          1500
+        );
+      } catch {
+        // ignore
+      }
     }
+  } catch (err) {
+    reportDbError(err);
+    console.warn("[seed] Database offline, skipping DB base data seed:", (err as Error)?.message || err);
   }
   void seedDirCandidate();
 }
 
 export async function ensureSeed() {
-  await ensureBaseData();
+  if (isDbOnCooldown()) {
+    console.log("[seed] Database is offline or on cooldown, using in-memory demo collections.");
+    return;
+  }
+  try {
+    await ensureBaseData();
+    if (isDbOnCooldown()) return;
   console.log("[seed] Verifying demo accounts and content collections…");
   const m = await seedMedia();
 
@@ -486,6 +504,10 @@ export async function ensureSeed() {
       ],
     });
   }
+} catch (err) {
+  reportDbError(err);
+  console.warn("[seed] Notice: Seed aborted due to DB connection timeout, using resilient offline caches:", (err as Error)?.message || err);
+}
 
   console.log("[seed] Done.");
 }

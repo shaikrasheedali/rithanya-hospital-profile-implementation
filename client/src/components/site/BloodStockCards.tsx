@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Droplet, RefreshCw } from "lucide-react";
+import { Droplet, RefreshCw } from "lucide-react";
 
 export type StockRow = {
   id: string;
@@ -136,7 +136,6 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
               </div>
               <div className="relative mt-6 space-y-4">
                 {rows.map((r) => {
-                  const low = r.value <= threshold;
                   return (
                     <div key={r.label}>
                       <div className="flex items-baseline justify-between">
@@ -149,11 +148,6 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
                       <div className="mt-1.5 h-2 overflow-hidden rounded-full" style={{ background: t.ring }}>
                         <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min(100, (r.value / max) * 100)}%`, background: t.bar }} />
                       </div>
-                      {low && (
-                        <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-navy px-2.5 py-0.5 text-sm font-semibold text-white">
-                          <AlertTriangle className="h-3.5 w-3.5 text-gold" /> Critical — call to confirm
-                        </p>
-                      )}
                     </div>
                   );
                 })}

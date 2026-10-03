@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Droplet, Minus, Plus, RefreshCw, Save } from "lucide-react";
+import { Droplet, Minus, Plus, RefreshCw, Save } from "lucide-react";
 import { Btn, PageHeader, api, useToast } from "@/components/portal/ui";
 import { formatDate } from "@/lib/utils";
 
@@ -15,7 +15,7 @@ const THEME: Record<string, { bg: string; fg: string }> = {
   AB: { bg: "#F8FAFC", fg: "#0A2540" },
 };
 
-function Stepper({ label, value, onChange, low, fg }: { label: string; value: number; onChange: (n: number) => void; low: boolean; fg: string }) {
+function Stepper({ label, value, onChange, fg }: { label: string; value: number; onChange: (n: number) => void; fg: string }) {
   return (
     <div>
       <p className="text-base font-semibold" style={{ color: fg }}>{label}</p>
@@ -24,7 +24,6 @@ function Stepper({ label, value, onChange, low, fg }: { label: string; value: nu
         <input aria-label={label} type="number" min={0} value={value} onChange={(e) => onChange(Math.max(0, Math.trunc(Number(e.target.value) || 0)))} className="w-20 rounded-lg border-0 bg-white/90 py-2 text-center font-heading text-2xl font-bold text-navy shadow" />
         <button type="button" aria-label={`Increase ${label}`} onClick={() => onChange(value + 1)} className="rounded-lg bg-white/90 p-2.5 text-navy shadow hover:bg-white"><Plus className="h-4 w-4" /></button>
       </div>
-      {low && <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-navy px-2.5 py-0.5 text-sm font-semibold text-white"><AlertTriangle className="h-3.5 w-3.5 text-gold" /> Below threshold</p>}
     </div>
   );
 }
@@ -81,8 +80,8 @@ export function BloodBankManager({ initial, threshold }: { initial: Row[]; thres
               <p className="font-heading text-6xl font-bold leading-none">{displayGroup}</p>
               <p className="mb-5 mt-1 text-sm font-semibold uppercase tracking-widest opacity-80">Blood group</p>
               <div className="space-y-5">
-                <Stepper label="Whole blood units" value={r.wholeBloodUnits} onChange={(v) => set(r.bloodGroup, "wholeBloodUnits", v)} low={r.wholeBloodUnits <= threshold} fg={t.fg} />
-                <Stepper label="Plasma units" value={r.plasmaUnits} onChange={(v) => set(r.bloodGroup, "plasmaUnits", v)} low={r.plasmaUnits <= threshold} fg={t.fg} />
+                <Stepper label="Whole blood units" value={r.wholeBloodUnits} onChange={(v) => set(r.bloodGroup, "wholeBloodUnits", v)} fg={t.fg} />
+                <Stepper label="Plasma units" value={r.plasmaUnits} onChange={(v) => set(r.bloodGroup, "plasmaUnits", v)} fg={t.fg} />
               </div>
             </section>
           );

@@ -1,7 +1,19 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { PortalShell } from "@/components/portal/PortalShell";
 import type { SessionUser } from "@/lib/auth";
+
+type PortalContextType = {
+  user: SessionUser | null;
+  entity: "RITHANYA_HOSPITAL" | "RVBC";
+};
+
+export const PortalUserContext = createContext<PortalContextType>({
+  user: null,
+  entity: "RITHANYA_HOSPITAL",
+});
+
+export const usePortalUser = () => useContext(PortalUserContext);
 
 function getCookie(name: string): string | null {
   const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
@@ -36,9 +48,11 @@ export default function PortalLayout({ children }: { children?: ReactNode }) {
   }
 
   return (
-    <PortalShell user={user} entity={entity}>
-      {children ?? <Outlet />}
-    </PortalShell>
+    <PortalUserContext.Provider value={{ user, entity }}>
+      <PortalShell user={user} entity={entity}>
+        {children ?? <Outlet />}
+      </PortalShell>
+    </PortalUserContext.Provider>
   );
 }
 

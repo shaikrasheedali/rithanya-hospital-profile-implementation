@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Activity, Archive, Camera, CheckCircle2, LogOut, Plus, RotateCcw, Search, ShieldAlert, Stethoscope, X } from "lucide-react";
+import { Activity, Archive, Camera, CheckCircle2, LogOut, Plus, RotateCcw, Search, ShieldAlert, Stethoscope, Trash2, X } from "lucide-react";
 import { ConsentCameraModal } from "@/components/portal/ConsentCameraModal";
 import { TrajectoryGraphs } from "@/components/portal/TrajectoryGraphs";
 import { Badge, Btn, Card, Empty, Field, Modal, PageHeader, api, inputCls, useToast } from "@/components/portal/ui";
@@ -291,6 +291,22 @@ export function PatientsManager({ mode, patients, cats, showArchived = false }: 
   const [typeF, setTypeF] = useState("");
   const [creating, setCreating] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const toast = useToast();
+
+  async function handleDelete(patient: PatientDTO) {
+    if (!window.confirm(`Are you sure you want to permanently delete patient ${patient.fullName} (${patient.uhid})? This action cannot be undone.`)) {
+      return;
+    }
+    setDeletingId(patient.id);
+    const r = await api(`/api/portal/r/patients/${patient.id}`, "DELETE");
+    setDeletingId(null);
+    if (!r.ok) {
+      return toast(r.error || "Failed to delete patient record", "err");
+    }
+    toast(`Patient ${patient.fullName} deleted successfully`);
+    refresh();
+  }
 
   const title = mode === "INPATIENT" ? "Inpatients" : mode === "OUTPATIENT" ? "Outpatients & daycare queue" : "Discharged patients archive";
   const desc =
@@ -339,7 +355,22 @@ export function PatientsManager({ mode, patients, cats, showArchived = false }: 
                     <td className="px-4 py-3">{p.categoryName ? <Badge tone="blue">{p.categoryName}</Badge> : <span className="text-ink/50">—</span>}{mode === "DISCHARGED" && <span className="ml-1.5"><Badge>{p.patientType === "INPATIENT" ? "IP" : "OP"}</Badge></span>}</td>
                     <td className="px-4 py-3 whitespace-nowrap">{mode === "OUTPATIENT" ? formatDate(p.createdAt) : mode === "DISCHARGED" ? formatDate(p.dischargeDate) : p.roomBedNumber ?? "—"}</td>
                     <td className="px-4 py-3">{p.allergies.length ? <Badge tone="red">{p.allergies.length} allerg{p.allergies.length === 1 ? "y" : "ies"}</Badge> : <span className="text-ink/50">None</span>}</td>
-                    <td className="px-4 py-3 text-right"><Btn small variant="secondary" onClick={() => navigate(`/portal/patients/${p.id}`)}><Stethoscope className="h-4 w-4" /> Open Profile</Btn></td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Btn small variant="secondary" onClick={() => navigate(`/portal/patients/${p.id}`)}>
+                          <Stethoscope className="h-4 w-4" /> Open Profile
+                        </Btn>
+                        <Btn
+                          small
+                          variant="danger"
+                          onClick={() => handleDelete(p)}
+                          disabled={deletingId === p.id}
+                          title="Delete patient record"
+                        >
+                          <Trash2 className="h-4 w-4" /> Delete
+                        </Btn>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

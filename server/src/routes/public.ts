@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "../db.js";
+import { createOrder } from "../orders.js";
 import { getSettings } from "../settings.js";
 import {
   getBlogs,
@@ -221,70 +222,8 @@ router.post("/appointments", async (req, res) => {
 });
 
 router.post("/orders", async (req, res) => {
-  const { name, phone, address, pin, paymentMethod, items } = req.body ?? {};
-  const customerName = String(name ?? "").trim();
-  const phoneNumber = String(phone ?? "").trim();
-  const shippingAddress = String(address ?? "").trim();
-  const pinCode = String(pin ?? "").trim();
-  if (customerName.length < 2) {
-    res.status(400).json({ error: "Please enter your name" });
-    return;
-  }
-  if (phoneDigits(phoneNumber).length < 10) {
-    res.status(400).json({ error: "Please enter a valid phone number" });
-    return;
-  }
-  if (shippingAddress.length < 8) {
-    res.status(400).json({ error: "Please enter your full address" });
-    return;
-  }
-  if (!/^\d{6}$/.test(pinCode)) {
-    res.status(400).json({ error: "Please enter a valid 6-digit PIN code" });
-    return;
-  }
-  if (!Array.isArray(items) || !items.length) {
-    res.status(400).json({ error: "Your cart is empty" });
-    return;
-  }
-  const method = paymentMethod === "UPI" ? "UPI" : "COD";
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      let subtotal = 0;
-      const lines: Array<{ productId: string; quantity: number; unitPrice: number; productName: string }> = [];
-      for (const it of items) {
-        const qty = Math.trunc(Number(it.quantity ?? it.qty ?? 1));
-        if (!Number.isFinite(qty) || qty < 1 || qty > 20) throw new Error("Invalid quantity");
-        const prod = await tx.product.findUnique({ where: { id: String(it.productId ?? it.id) } });
-        if (!prod) throw new Error("A product in your cart is no longer available");
-        if (prod.stockUnits < qty) throw new Error(`Only ${prod.stockUnits} unit(s) of ${prod.name} are available`);
-        subtotal += prod.price * qty;
-        lines.push({ productId: prod.id, quantity: qty, unitPrice: prod.price, productName: prod.name });
-      }
-      const delivery = subtotal >= 500 ? 0 : 40;
-      const total = subtotal + delivery;
-      const count = await tx.order.count();
-      let orderNumber = `ORD-${new Date().getFullYear()}-${String(count + 1).padStart(4, "0")}`;
-      const clash = await tx.order.findUnique({ where: { orderNumber } });
-      if (clash) orderNumber += `-${Math.floor(Math.random() * 900 + 100)}`;
-      const order = await tx.order.create({
-        data: {
-          orderNumber,
-          customerName: customerName.slice(0, 200),
-          phoneNumber: phoneNumber.slice(0, 30),
-          shippingAddress: shippingAddress.slice(0, 1000),
-          pinCode,
-          totalAmount: total,
-          status: "PENDING",
-          paymentMethod: method,
-          isPaid: false,
-        },
-      });
-      for (const l of lines) {
-        await tx.orderItem.create({ data: { orderId: order.id, ...l } });
-        await tx.product.update({ where: { id: l.productId }, data: { stockUnits: { decrement: l.quantity } } });
-      }
-      return { orderNumber, total };
-    });
+    const result = await createOrder(req.body ?? {});
     res.json({ ok: true, ...result });
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : "Could not place order" });

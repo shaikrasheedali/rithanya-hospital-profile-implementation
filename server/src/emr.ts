@@ -52,15 +52,10 @@ export type ClinicalCategoryDTO = {
 };
 
 const CACHE_FILE = path.resolve(process.cwd(), "uploads", "patients-cache.json");
+const CACHE_CATEGORIES_FILE = path.resolve(process.cwd(), "uploads", "categories-cache.json");
 
-// Default initial clinical categories
-const INITIAL_CATEGORIES: ClinicalCategoryDTO[] = [
-  { id: "cat-blood-disorders", name: "Blood Disorders & Daycare", description: "Thalassemia, sickle cell disease, aplastic anemia, and scheduled transfusion therapy.", patientCount: 1 },
-  { id: "cat-diabetology", name: "Diabetology & Endocrinology", description: "Comprehensive glycemic control, continuous glucose monitoring, and metabolic complications.", patientCount: 1 },
-  { id: "cat-critical-care", name: "Emergency & Critical Care", description: "Acute trauma, hemodynamics, septic shock, and multi-organ monitoring.", patientCount: 0 },
-  { id: "cat-cardiology", name: "Cardiology & Vascular", description: "Hypertension, ischemic heart disease, and heart failure telemetry.", patientCount: 0 },
-  { id: "cat-ortho", name: "Orthopaedics & Trauma", description: "Joint replacements, bone trauma, and post-operative mobility rehabilitation.", patientCount: 1 },
-];
+// Default initial clinical categories - start empty so only user-added categories exist
+const INITIAL_CATEGORIES: ClinicalCategoryDTO[] = [];
 
 // Initial seeded patients with rich longitudinal vitals
 const INITIAL_PATIENTS: PatientDTO[] = [
@@ -76,8 +71,8 @@ const INITIAL_PATIENTS: PatientDTO[] = [
     clinicalCondition: "Thalassemia Minor & Chronic Microcytic Hypochromic Anemia with Secondary Iron Deficiency. Regular daycare transfusion review and hematology observation.",
     allergies: ["Sulfa drugs", "Penicillin"],
     consentPhotoUrl: null,
-    categoryId: "cat-blood-disorders",
-    categoryName: "Blood Disorders & Daycare",
+    categoryId: null,
+    categoryName: null,
     isDischarged: false,
     isArchived: false,
     createdAt: new Date("2026-07-01T09:30:00.000Z").toISOString(),
@@ -164,8 +159,8 @@ const INITIAL_PATIENTS: PatientDTO[] = [
     clinicalCondition: "Type 2 Diabetes Mellitus with Severe Hyperglycaemia & Microvascular Complications. Continuous insulin infusion and hemodynamic monitoring.",
     allergies: ["Aspirin", "NSAIDs"],
     consentPhotoUrl: null,
-    categoryId: "cat-diabetology",
-    categoryName: "Diabetology & Endocrinology",
+    categoryId: null,
+    categoryName: null,
     isDischarged: false,
     isArchived: false,
     createdAt: new Date("2026-09-30T07:30:00.000Z").toISOString(),
@@ -236,8 +231,8 @@ const INITIAL_PATIENTS: PatientDTO[] = [
     clinicalCondition: "Total Hip Replacement post-operative rehabilitation.",
     allergies: ["Iodine contrast"],
     consentPhotoUrl: null,
-    categoryId: "cat-ortho",
-    categoryName: "Orthopaedics & Trauma",
+    categoryId: null,
+    categoryName: null,
     isDischarged: true,
     isArchived: false,
     createdAt: new Date("2026-09-20T10:00:00.000Z").toISOString(),
@@ -267,7 +262,7 @@ const INITIAL_PATIENTS: PatientDTO[] = [
 ];
 
 let inMemoryPatients: PatientDTO[] = loadCache();
-let inMemoryCategories: ClinicalCategoryDTO[] = [...INITIAL_CATEGORIES];
+let inMemoryCategories: ClinicalCategoryDTO[] = loadCategoriesCache();
 
 function loadCache(): PatientDTO[] {
   try {
@@ -282,6 +277,19 @@ function loadCache(): PatientDTO[] {
   return [...INITIAL_PATIENTS];
 }
 
+function loadCategoriesCache(): ClinicalCategoryDTO[] {
+  try {
+    if (fs.existsSync(CACHE_CATEGORIES_FILE)) {
+      const data = fs.readFileSync(CACHE_CATEGORIES_FILE, "utf-8");
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.warn("[emr] Could not read categories cache file:", err);
+  }
+  return [...INITIAL_CATEGORIES];
+}
+
 function persistCache(): void {
   try {
     const dir = path.dirname(CACHE_FILE);
@@ -289,6 +297,16 @@ function persistCache(): void {
     fs.writeFileSync(CACHE_FILE, JSON.stringify(inMemoryPatients, null, 2), "utf-8");
   } catch (err) {
     console.warn("[emr] Could not persist patients cache file:", err);
+  }
+}
+
+function persistCategoriesCache(): void {
+  try {
+    const dir = path.dirname(CACHE_CATEGORIES_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(CACHE_CATEGORIES_FILE, JSON.stringify(inMemoryCategories, null, 2), "utf-8");
+  } catch (err) {
+    console.warn("[emr] Could not persist categories cache file:", err);
   }
 }
 
@@ -375,12 +393,21 @@ export async function loadPatients(opts: {
   }
 
   // Fallback to in-memory store
-  return inMemoryPatients.filter((p) => {
-    if (opts.discharged !== p.isDischarged) return false;
-    if (Boolean(opts.archived) !== Boolean(p.isArchived)) return false;
-    if (opts.type && p.patientType !== opts.type) return false;
-    return true;
-  });
+  return inMemoryPatients
+    .filter((p) => {
+      if (opts.discharged !== p.isDischarged) return false;
+      if (Boolean(opts.archived) !== Boolean(p.isArchived)) return false;
+      if (opts.type && p.patientType !== opts.type) return false;
+      return true;
+    })
+    .map((p) => {
+      const cat = inMemoryCategories.find((c) => c.id === p.categoryId);
+      return {
+        ...p,
+        categoryId: cat ? cat.id : null,
+        categoryName: cat ? cat.name : null,
+      };
+    });
 }
 
 export async function getPatientById(id: string): Promise<PatientDTO | null> {
@@ -443,7 +470,15 @@ export async function getPatientById(id: string): Promise<PatientDTO | null> {
       reportDbError(err);
     }
   }
-  return fromMem ?? null;
+  if (fromMem) {
+    const cat = inMemoryCategories.find((c) => c.id === fromMem.categoryId);
+    return {
+      ...fromMem,
+      categoryId: cat ? cat.id : null,
+      categoryName: cat ? cat.name : null,
+    };
+  }
+  return null;
 }
 
 export async function createPatientRecord(data: {
@@ -726,6 +761,30 @@ export async function archivePatientRecord(id: string, isArchived: boolean): Pro
   return { ok: true };
 }
 
+export async function deletePatientRecord(id: string): Promise<{ ok: boolean }> {
+  const idx = inMemoryPatients.findIndex((x) => x.id === id || x.uhid === id);
+  if (idx >= 0) {
+    inMemoryPatients.splice(idx, 1);
+  }
+  persistCache();
+
+  if (!isDbOnCooldown()) {
+    withDbTimeout(
+      prisma.$transaction(async (tx) => {
+        await tx.vitalLog.deleteMany({ where: { patientId: id } });
+        await tx.inpatientStay.deleteMany({ where: { patientId: id } });
+        await tx.patient.delete({ where: { id } });
+      }),
+      3000
+    ).catch((err) => {
+      reportDbError(err);
+      console.warn("[emr] Background DB patient delete failed:", err?.message || err);
+    });
+  }
+
+  return { ok: true };
+}
+
 export async function loadCategories(): Promise<ClinicalCategoryDTO[]> {
   if (!isDbOnCooldown()) {
     try {
@@ -740,6 +799,7 @@ export async function loadCategories(): Promise<ClinicalCategoryDTO[]> {
         patientCount: map.get(c.id) ?? 0,
       }));
       inMemoryCategories = mapped;
+      persistCategoriesCache();
       return mapped;
     } catch (err) {
       reportDbError(err);
@@ -756,3 +816,82 @@ export async function loadCategories(): Promise<ClinicalCategoryDTO[]> {
     patientCount: countsMap.get(c.id) ?? c.patientCount ?? 0,
   }));
 }
+
+export async function createClinicalCategory(data: { name: string; description?: string | null }): Promise<ClinicalCategoryDTO> {
+  const name = data.name.trim();
+  const existing = inMemoryCategories.find((c) => c.name.toLowerCase() === name.toLowerCase());
+  if (existing) {
+    const err = new Error("A category with this name already exists");
+    (err as any).status = 409;
+    throw err;
+  }
+
+  const id = `cat-${crypto.randomUUID()}`;
+  const newCat: ClinicalCategoryDTO = {
+    id,
+    name,
+    description: data.description ? data.description.trim() : "",
+    patientCount: 0,
+  };
+
+  inMemoryCategories.push(newCat);
+  persistCategoriesCache();
+
+  if (!isDbOnCooldown()) {
+    withDbTimeout(
+      prisma.clinicalCategory.create({
+        data: { id, name: newCat.name, description: newCat.description || null },
+      }),
+      2500
+    ).catch((err) => {
+      reportDbError(err);
+      console.warn("[emr] Background DB sync for clinical category create failed:", err?.message || err);
+    });
+  }
+
+  return newCat;
+}
+
+export async function updateClinicalCategory(id: string, data: { name: string; description?: string | null }): Promise<ClinicalCategoryDTO> {
+  const cat = inMemoryCategories.find((c) => c.id === id);
+  if (!cat) throw new Error("Category not found");
+
+  const name = data.name.trim();
+  const duplicate = inMemoryCategories.find((c) => c.id !== id && c.name.toLowerCase() === name.toLowerCase());
+  if (duplicate) {
+    const err = new Error("A category with this name already exists");
+    (err as any).status = 409;
+    throw err;
+  }
+
+  cat.name = name;
+  if (data.description !== undefined) cat.description = data.description ? data.description.trim() : "";
+  persistCategoriesCache();
+
+  if (!isDbOnCooldown()) {
+    withDbTimeout(
+      prisma.clinicalCategory.update({
+        where: { id },
+        data: { name: cat.name, description: cat.description || null },
+      }),
+      2500
+    ).catch((err) => {
+      reportDbError(err);
+    });
+  }
+
+  return cat;
+}
+
+export async function deleteClinicalCategory(id: string): Promise<void> {
+  const idx = inMemoryCategories.findIndex((c) => c.id === id);
+  if (idx >= 0) inMemoryCategories.splice(idx, 1);
+  persistCategoriesCache();
+
+  if (!isDbOnCooldown()) {
+    withDbTimeout(prisma.clinicalCategory.delete({ where: { id } }), 2500).catch((err) => {
+      reportDbError(err);
+    });
+  }
+}
+
