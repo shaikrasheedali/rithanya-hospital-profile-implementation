@@ -11,6 +11,7 @@
     "lint": "echo \"(no eslint configured — typecheck covers quality)\""
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.9.0",
     "lucide-react": "^1.49.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",

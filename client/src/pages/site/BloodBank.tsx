@@ -21,6 +21,7 @@ export default function BloodBankPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hotline, setHotline] = useState("8328581019");
+  const [whatsapp, setWhatsapp] = useState("918328581019");
   const [threshold, setThreshold] = useState(3);
 
   useEffect(() => {
@@ -47,6 +48,7 @@ export default function BloodBankPage() {
       .then((d) => {
         if (!alive || !d?.settings) return;
         if (d.settings.emergencyHotline) setHotline(d.settings.emergencyHotline);
+        if (d.settings.whatsappNumber) setWhatsapp(d.settings.whatsappNumber);
         if (typeof d.settings.criticalBloodAlertThreshold === "number") setThreshold(d.settings.criticalBloodAlertThreshold);
       })
       .catch(() => {});
@@ -170,7 +172,7 @@ export default function BloodBankPage() {
                 </div>
                 <div className="mt-8 flex gap-4">
                   <a
-                    href="https://wa.me/918328581019?text=Hi%2C%20I%20would%20like%20to%20register%20as%20a%20voluntary%20blood%20donor"
+                    href={`https://wa.me/${whatsapp}?text=${encodeURIComponent("Hi, I would like to register as a voluntary blood donor at Rithanya / RVBC")}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 rounded-full bg-royal px-6 py-3 font-semibold text-white hover:bg-navy"

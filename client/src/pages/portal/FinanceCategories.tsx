@@ -17,6 +17,10 @@ export default function FinanceCategoriesPage() {
   if (loading) return <LoadingCard />;
   if (error || !data) return <ErrorCard error={error ?? "Load failed"} onRetry={reload} />;
 
+  const payrollIds = data.items
+    .filter((c: any) => c.name?.toLowerCase() === "payroll")
+    .map((c: any) => c.id);
+
   return (
     <CrudManager
       title={`Expense categories — ${data.entityLabel || (data.entity === "RVBC" ? "RVBC" : "Rithanya Hospital")}`}
@@ -25,6 +29,7 @@ export default function FinanceCategoriesPage() {
       rows={data.items}
       headerNote={<EntityPicker value={data.entity} />}
       defaults={{ entity: data.entity }}
+      lockedIds={payrollIds}
       columns={[
         { key: "name", label: "Category" },
         { key: "description", label: "Notes" },

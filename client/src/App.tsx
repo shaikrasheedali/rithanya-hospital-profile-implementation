@@ -16,6 +16,8 @@ import InsightDetailPage from "@/pages/site/InsightDetail";
 import InsurancePage from "@/pages/site/Insurance";
 import ContactPage from "@/pages/site/Contact";
 import PrivacyPage from "@/pages/site/Privacy";
+import TermsPage from "@/pages/site/Terms";
+import DisclaimerPage from "@/pages/site/Disclaimer";
 import DpdpPage from "@/pages/site/Dpdp";
 import BloodBankPublicPage from "@/pages/site/BloodBank";
 import PortalLayout from "@/pages/portal/PortalLayout";
@@ -93,6 +95,10 @@ export default function App() {
           <Route path="insurance" element={<Navigate to="/insurance-providers" replace />} />
           <Route path="contact" element={<ContactPage />} />
           <Route path="privacy-policy" element={<PrivacyPage />} />
+          <Route path="privacy" element={<PrivacyPage />} />
+          <Route path="terms-conditions" element={<TermsPage />} />
+          <Route path="terms" element={<TermsPage />} />
+          <Route path="disclaimer" element={<DisclaimerPage />} />
           <Route path="dpdp-erasure-request" element={<DpdpPage />} />
         </Route>
 

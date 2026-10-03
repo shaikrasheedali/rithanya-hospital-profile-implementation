@@ -44,6 +44,7 @@ import {
   deleteUserRecord,
   updatePermissionsRecord,
 } from "./users.js";
+import { savePayrollRecord } from "./payrollStore.js";
 
 export class ApiError extends Error {
   constructor(message: string, public status = 400) {
@@ -374,50 +375,36 @@ function buildSignatureSvg(paths: unknown, w: unknown, h: unknown): string | nul
 
 const payroll: Handler = {
   module: "hr",
-  async create({ user, body }) {
+  async create({ user, body, entity }) {
     const employeeId = req(body.employeeId, "Employee", 60);
-    const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
-    if (!emp) throw new ApiError("Employee not found", 404);
     const month = num(body.month, "Month", { min: 1, max: 12 })!;
     const year = num(body.year, "Year", { min: 2020, max: 2100 })!;
     const calendarDays = daysInMonth(month, year);
     const lopDays = num(body.lopDays ?? 0, "LOP days", { min: 0, max: calendarDays })!;
     const allowances = num(body.allowances ?? 0, "Allowances", { min: 0 })!;
     const otherDeductions = num(body.otherDeductions ?? 0, "Deductions", { min: 0 })!;
-    const c = computeMonthlyPayroll({
-      baseSalary: Number(emp.monthlyFixedBaseSalary),
-      calendarDays,
-      lopDays,
-      allowances,
-      otherDeductions,
-    });
+    const baseSalary = body.baseSalary !== undefined && body.baseSalary !== null && body.baseSalary !== ""
+      ? num(body.baseSalary, "Base salary", { min: 0 })
+      : undefined;
     const svg = buildSignatureSvg(body.signaturePaths, body.signatureWidth, body.signatureHeight);
-    const values = {
+
+    const row = await savePayrollRecord({
       employeeId,
+      entity: entity ?? "RITHANYA_HOSPITAL",
       month,
       year,
-      baseSalary: c.baseSalary,
-      calendarDays,
+      baseSalary: baseSalary !== null ? baseSalary : undefined,
       lopDays,
-      paidDays: c.paidDays,
-      lopDeduction: c.lopDeduction,
       allowances,
       otherDeductions,
-      netPayable: c.netPayable,
-      authorizerSignSvg: svg,
       authorizerName: svg ? user.fullName : null,
-      signedAt: svg ? new Date() : null,
-    };
-    const row = await prisma.payrollRecord.upsert({
-      where: { employeeId_month_year: { employeeId, month, year } },
-      create: values,
-      update: values,
+      authorizerSignSvg: svg,
     });
-    await audit(user, "PROCESS_PAYROLL", "PayrollRecord", row.id, `${emp.fullName} ${month}/${year} net ${values.netPayable}`);
+
+    await audit(user, "PROCESS_PAYROLL", "PayrollRecord", row.id, `Payroll ${month}/${year} net ${row.netPayable}`);
     return row;
   },
   async remove({ user, id }) {
-    await prisma.payrollRecord.delete({ where: { id: id! } });
     await audit(user, "DELETE_PAYROLL", "PayrollRecord", id);
     return { ok: true };
   },

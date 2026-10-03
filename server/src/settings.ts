@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { prisma, isDbOnCooldown, reportDbError, reportDbSuccess, withDbTimeout } from "./db.js";
 
 export const DEFAULT_ADDRESS =
@@ -27,21 +29,50 @@ export const DEFAULT_SETTINGS = {
   socialShareThumbnailUrl: null as string | null,
 };
 
-let cachedSettings = { ...DEFAULT_SETTINGS };
+const CACHE_FILE = path.resolve(process.cwd(), "uploads", "settings-cache.json");
+
+function loadSettingsCache() {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      const raw = fs.readFileSync(CACHE_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return { ...DEFAULT_SETTINGS, ...parsed };
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] Could not read settings cache:", err);
+  }
+  return { ...DEFAULT_SETTINGS };
+}
+
+let cachedSettings = loadSettingsCache();
 let settingsLoaded = false;
+
+function persistSettingsCache(): void {
+  try {
+    const dir = path.dirname(CACHE_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cachedSettings, null, 2), "utf-8");
+  } catch (err) {
+    console.warn("[settings] Could not persist settings cache file:", err);
+  }
+}
 
 export function updateCachedSettings(partial: Partial<typeof DEFAULT_SETTINGS>): void {
   cachedSettings = { ...cachedSettings, ...partial };
+  persistSettingsCache();
 }
 
 export async function getSettings() {
-  if (settingsLoaded || isDbOnCooldown()) return cachedSettings;
+  if (isDbOnCooldown()) return cachedSettings;
   try {
     const row = await withDbTimeout(prisma.hospitalSetting.findUnique({ where: { id: "PRIMARY_CONFIG" } }), 1500);
     if (row) {
       reportDbSuccess();
       cachedSettings = { ...cachedSettings, ...row };
       settingsLoaded = true;
+      persistSettingsCache();
       return cachedSettings;
     }
   } catch (err) {

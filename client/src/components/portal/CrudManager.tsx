@@ -165,7 +165,11 @@ export function CrudManager({
                       <div className="flex justify-end gap-2">
                         {rowActions.map((a) => <Btn key={a.action} small variant="secondary" disabled={rowBusy === `${r.id}:${a.action}`} onClick={() => act(r, a.action)}><Power className="h-4 w-4" /> {rowBusy === `${r.id}:${a.action}` ? "…" : a.label}</Btn>)}
                         {!lockedIds.includes(r.id) && <Btn small variant="secondary" onClick={() => open(r)} aria-label="Edit"><Pencil className="h-4 w-4" /> Edit</Btn>}
-                        {canDelete && !lockedIds.includes(r.id) && <Btn small variant="ghost" disabled={rowBusy === r.id} onClick={() => del(r)} aria-label="Delete" className="!text-alert hover:!bg-alert/10"><Trash2 className="h-4 w-4" /></Btn>}
+                        {canDelete && !lockedIds.includes(r.id) && String(r.name ?? "").toLowerCase() !== "payroll" && (
+                          <Btn small variant="ghost" disabled={rowBusy === r.id} onClick={() => del(r)} aria-label="Delete" className="!text-alert hover:!bg-alert/10">
+                            <Trash2 className="h-4 w-4" />
+                          </Btn>
+                        )}
                       </div>
                     </td>
                   </tr>

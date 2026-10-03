@@ -65,6 +65,20 @@ const SEED_CATEGORIES: ExpenseCategoryDTO[] = [
     description: "Transportation, donor donor badges, nutritional refreshments, and mobile donor couch sets.",
     createdAt: new Date("2026-01-02").toISOString(),
   },
+  {
+    id: "cat-payroll-rh",
+    entity: "RITHANYA_HOSPITAL",
+    name: "Payroll",
+    description: "Monthly staff salaries, disbursements, and healthcare team compensation.",
+    createdAt: new Date("2026-01-01").toISOString(),
+  },
+  {
+    id: "cat-payroll-rvbc",
+    entity: "RVBC",
+    name: "Payroll",
+    description: "Blood bank personnel compensation and staff allowances.",
+    createdAt: new Date("2026-01-01").toISOString(),
+  },
 ];
 
 const SEED_LEDGER: ExpenseLedgerDTO[] = [
@@ -106,6 +120,59 @@ type FinanceStore = {
 };
 
 let inMemoryFinance: FinanceStore = loadCache();
+ensurePayrollCategoryExists();
+
+function ensurePayrollCategoryExists(): void {
+  for (const ent of ["RITHANYA_HOSPITAL", "RVBC"] as const) {
+    const found = inMemoryFinance.categories.find(
+      (c) => c.entity === ent && c.name.toLowerCase() === "payroll"
+    );
+    if (!found) {
+      inMemoryFinance.categories.push({
+        id: `cat-payroll-${ent.toLowerCase()}`,
+        entity: ent,
+        name: "Payroll",
+        description: "Monthly staff salaries, disbursements, and healthcare team compensation.",
+        createdAt: new Date("2026-01-01").toISOString(),
+      });
+    }
+  }
+}
+
+export function pruneOldLedgerEntries(): void {
+  const now = new Date();
+  const currentTotalMonths = now.getFullYear() * 12 + (now.getMonth() + 1);
+  const cutoffTotalMonths = currentTotalMonths - 12;
+
+  const originalCount = inMemoryFinance.ledger.length;
+  const prunedIds: string[] = [];
+
+  inMemoryFinance.ledger = inMemoryFinance.ledger.filter((entry) => {
+    const d = new Date(entry.entryDate);
+    if (isNaN(d.getTime())) return true;
+    const entryTotalMonths = d.getFullYear() * 12 + (d.getMonth() + 1);
+    if (entryTotalMonths < cutoffTotalMonths) {
+      prunedIds.push(entry.id);
+      return false;
+    }
+    return true;
+  });
+
+  if (inMemoryFinance.ledger.length !== originalCount) {
+    persistCache();
+    console.log(`[finance] 12-Month retention pruned ${originalCount - inMemoryFinance.ledger.length} old ledger entries`);
+    if (!isDbOnCooldown() && prunedIds.length > 0) {
+      withDbTimeout(
+        prisma.expenseLedger.deleteMany({
+          where: { id: { in: prunedIds } },
+        }),
+        3000
+      ).catch((err) => {
+        reportDbError(err);
+      });
+    }
+  }
+}
 
 function loadCache(): FinanceStore {
   try {
@@ -136,6 +203,7 @@ function persistCache(): void {
 }
 
 export async function loadExpenseCategories(entity: string): Promise<ExpenseCategoryDTO[]> {
+  ensurePayrollCategoryExists();
   const targetEntity = entity === "RVBC" ? "RVBC" : "RITHANYA_HOSPITAL";
 
   if (!isDbOnCooldown()) {
@@ -257,6 +325,13 @@ export async function updateExpenseCategoryRecord(
 }
 
 export async function deleteExpenseCategoryRecord(id: string): Promise<void> {
+  const cat = inMemoryFinance.categories.find((x) => x.id === id);
+  if (!cat) throw new Error("Category not found");
+  if (cat.name.toLowerCase() === "payroll") {
+    const err = new Error("The Payroll category is mandatory and cannot be deleted");
+    (err as any).status = 400;
+    throw err;
+  }
   const idx = inMemoryFinance.categories.findIndex((x) => x.id === id);
   if (idx >= 0) inMemoryFinance.categories.splice(idx, 1);
   persistCache();
@@ -268,7 +343,48 @@ export async function deleteExpenseCategoryRecord(id: string): Promise<void> {
   }
 }
 
+export async function deleteMonthLedgerEntries(
+  entity: string,
+  year: number,
+  month: number
+): Promise<{ count: number }> {
+  const targetEntity = entity === "RVBC" ? "RVBC" : "RITHANYA_HOSPITAL";
+  const removedIds: string[] = [];
+
+  inMemoryFinance.ledger = inMemoryFinance.ledger.filter((entry) => {
+    if (entry.entity !== targetEntity) return true;
+    const d = new Date(entry.entryDate);
+    if (isNaN(d.getTime())) return true;
+    const entryYear = d.getFullYear();
+    const entryMonth = d.getMonth() + 1;
+    if (entryYear === year && entryMonth === month) {
+      removedIds.push(entry.id);
+      return false;
+    }
+    return true;
+  });
+
+  persistCache();
+
+  if (!isDbOnCooldown() && removedIds.length > 0) {
+    try {
+      await withDbTimeout(
+        prisma.expenseLedger.deleteMany({
+          where: { id: { in: removedIds } },
+        }),
+        3000
+      );
+    } catch (err) {
+      reportDbError(err);
+    }
+  }
+
+  return { count: removedIds.length };
+}
+
 export async function loadLedgerEntries(entity: string): Promise<ExpenseLedgerDTO[]> {
+  pruneOldLedgerEntries();
+  ensurePayrollCategoryExists();
   const targetEntity = entity === "RVBC" ? "RVBC" : "RITHANYA_HOSPITAL";
 
   if (!isDbOnCooldown()) {

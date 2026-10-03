@@ -26,7 +26,8 @@ export default function HrPayrollPage() {
     fullName: e.fullName,
     designation: e.designation,
     department: e.department,
-    base: Number(e.monthlyFixedBaseSalary),
+    base: Number(e.monthlyFixedBaseSalary ?? e.base ?? 0),
+    entity: e.entity ?? data.entity,
   }));
 
   const entityLabel = data.entity === "RVBC" ? "RVBC (Voluntary Blood Centre)" : "Rithanya Hospital";
@@ -37,11 +38,16 @@ export default function HrPayrollPage() {
       records={data.records.map((r: any) => ({
         id: r.id,
         employeeId: r.employeeId,
-        lopDays: r.lopDays,
-        allowances: Number(r.allowances),
-        otherDeductions: Number(r.otherDeductions),
-        netPayable: Number(r.netPayable),
+        baseSalary: r.baseSalary ? Number(r.baseSalary) : undefined,
+        calendarDays: r.calendarDays,
+        lopDays: Number(r.lopDays ?? 0),
+        paidDays: r.paidDays,
+        lopDeduction: r.lopDeduction ? Number(r.lopDeduction) : undefined,
+        allowances: Number(r.allowances ?? 0),
+        otherDeductions: Number(r.otherDeductions ?? 0),
+        netPayable: Number(r.netPayable ?? 0),
         signedAt: r.signedAt,
+        authorizerName: r.authorizerName,
       }))}
       month={data.month}
       year={data.year}

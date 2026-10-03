@@ -25,9 +25,11 @@ const cols = [
     ],
   },
   {
-    title: "Compliance",
+    title: "Legal & compliance",
     links: [
       ["Privacy policy", "/privacy-policy"],
+      ["Terms & conditions", "/terms-conditions"],
+      ["Disclaimer", "/disclaimer"],
       ["DPDP erasure request", "/dpdp-erasure-request"],
       ["Staff portal login", "/portal/login"],
     ],

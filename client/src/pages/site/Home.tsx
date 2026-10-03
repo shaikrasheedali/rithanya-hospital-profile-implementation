@@ -23,6 +23,7 @@ import { BookButton } from "@/components/site/BookButton";
 import { BloodStockCards } from "@/components/site/BloodStockCards";
 import { Carousel } from "@/components/site/Carousel";
 import { ArrowLink, Cover, NoticeBanner, SectionHeading, Stars } from "@/components/site/ui";
+import { useSiteSettings } from "@/lib/settingsContext";
 import { formatDate, prettyPhone, telHref, type MediaRef } from "@/lib/utils";
 
 const HIGHLIGHTS = [
@@ -67,8 +68,11 @@ function Loading() {
 }
 
 export default function HomePage() {
+  const { settings: globalSettings } = useSiteSettings();
   const [data, setData] = useState<HomeData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  const currentPhone = data?.settings?.emergencyHotline || globalSettings.emergencyHotline;
 
   useEffect(() => {
     document.title = "Rithanya Hospital (రితన్య హాస్పిటల్) | Khammam | 24/7 Emergency, Thalassemia Daycare & Diabetology";
@@ -91,7 +95,7 @@ export default function HomePage() {
   if (loadError && !data) {
     return (
       <>
-        <Hero phone="8328581019" />
+        <Hero phone={currentPhone} />
         <div className="mx-auto max-w-3xl px-6 py-24 text-center sm:px-8">
           <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-6 font-medium text-red-900">{loadError}</p>
           <button onClick={() => window.location.reload()} className="mt-6 rounded-full bg-royal px-6 py-3 font-semibold text-white">Try again</button>
@@ -99,7 +103,7 @@ export default function HomePage() {
       </>
     );
   }
-  if (!data) return (<><Hero phone="8328581019" /><Loading /></>);
+  if (!data) return (<><Hero phone={currentPhone} /><Loading /></>);
 
   const s = data.settings;
   const specialties = data.specialties;
@@ -115,7 +119,7 @@ export default function HomePage() {
 
   return (
     <>
-      <Hero phone={s.emergencyHotline} />
+      <Hero phone={currentPhone} />
 
       {/* Key highlights strip */}
       <section aria-label="Key highlights" className="on-dark overflow-hidden bg-navy py-5 text-white">

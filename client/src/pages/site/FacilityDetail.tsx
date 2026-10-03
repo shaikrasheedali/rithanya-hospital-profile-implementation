@@ -4,7 +4,8 @@ import { ArrowLeft, Building2, Calendar, CheckCircle2, ChevronRight, Phone, Shie
 import { Reveal } from "@/components/Reveal";
 import { MediaGallery } from "@/components/site/MediaGallery";
 import { BookButton } from "@/components/site/BookButton";
-import type { MediaRef } from "@/lib/utils";
+import { telHref, type MediaRef } from "@/lib/utils";
+import { useSiteSettings } from "@/lib/settingsContext";
 
 type FacilityItem = {
   id: string;
@@ -17,6 +18,7 @@ type FacilityItem = {
 
 export default function FacilityDetailPage() {
   const { slug } = useParams();
+  const { settings } = useSiteSettings();
   const [item, setItem] = useState<FacilityItem | null>(null);
   const [related, setRelated] = useState<FacilityItem[]>([]);
   const [missing, setMissing] = useState(false);
@@ -136,7 +138,7 @@ export default function FacilityDetailPage() {
                   <Calendar className="mr-2 h-4 w-4" /> Book Appointment
                 </BookButton>
                 <a
-                  href="tel:08742234567"
+                  href={telHref(settings.emergencyHotline)}
                   className="flex w-full items-center justify-center gap-2 rounded-full border border-royal bg-white px-5 py-2.5 text-sm font-semibold text-royal transition-colors hover:bg-royal hover:text-white"
                 >
                   <Phone className="h-4 w-4" /> Emergency Desk

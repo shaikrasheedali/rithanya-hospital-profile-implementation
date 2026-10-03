@@ -13,7 +13,8 @@ import { getSettings } from "../settings.js";
 import { loadPatients, loadCategories, getPatientById } from "../emr.js";
 import { loadOrders } from "../orders.js";
 import { loadEmployees } from "../employees.js";
-import { loadExpenseCategories, loadLedgerEntries } from "../finance.js";
+import { loadExpenseCategories, loadLedgerEntries, deleteMonthLedgerEntries } from "../finance.js";
+import { loadPayrollData, getPayslipById } from "../payrollStore.js";
 import { loadUsersList, loadPermissionsMatrix } from "../users.js";
 import { retentionState } from "../retention.js";
 import { FALLBACK_BLOOD_STOCK } from "../fallbackData.js";
@@ -450,14 +451,9 @@ router.get("/payroll", requireAuth("hr"), async (req, res) => {
   const month = Number(req.query.month ?? new Date().getMonth() + 1);
   const year = Number(req.query.year ?? new Date().getFullYear());
   const entity = getEntity(req);
-  if (isDbOnCooldown()) {
-    res.json({ employees: [], records: [], month, year, entity });
-    return;
-  }
   try {
-    const employees = await withDbTimeout(prisma.employee.findMany({ where: { isActive: true, entity }, orderBy: { fullName: "asc" } }), 1500);
-    const records = await withDbTimeout(prisma.payrollRecord.findMany({ where: { month, year, employee: { entity } }, include: { employee: true } }), 1500);
-    res.json({ employees, records, month, year, entity });
+    const data = await loadPayrollData(entity, month, year);
+    res.json({ employees: data.employees, records: data.records, month, year, entity });
   } catch (err) {
     reportDbError(err);
     res.json({ employees: [], records: [], month, year, entity });
@@ -465,17 +461,18 @@ router.get("/payroll", requireAuth("hr"), async (req, res) => {
 });
 
 router.get("/payslip/:id", requireAuth("hr"), async (req, res) => {
-  if (isDbOnCooldown()) {
-    res.status(404).json({ error: "Payslip not available offline" });
-    return;
-  }
   try {
-    const record = await withDbTimeout(prisma.payrollRecord.findUnique({ where: { id: param(req.params.id) }, include: { employee: true } }), 1500);
-    if (!record) {
-      res.status(404).json({ error: "Payslip not found" });
+    const payslip = await getPayslipById(param(req.params.id));
+    if (!payslip) {
+      const record = await withDbTimeout(prisma.payrollRecord.findUnique({ where: { id: param(req.params.id) }, include: { employee: true } }), 1500);
+      if (!record) {
+        res.status(404).json({ error: "Payslip not found" });
+        return;
+      }
+      res.json({ record, settings: await getSettings() });
       return;
     }
-    res.json({ record, settings: await getSettings() });
+    res.json({ record: payslip.record, settings: await getSettings() });
   } catch (err) {
     reportDbError(err);
     res.status(404).json({ error: "Payslip not found" });
@@ -497,6 +494,25 @@ router.get("/ledger", requireAuth("finance"), async (req, res) => {
   }
 });
 
+router.delete("/ledger/month", requireAuth("finance"), async (req, res) => {
+  const entity = getEntity(req);
+  const user = getUser(req);
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  if (!year || !month || isNaN(year) || isNaN(month)) {
+    res.status(400).json({ error: "Invalid year or month specified" });
+    return;
+  }
+  try {
+    const result = await deleteMonthLedgerEntries(entity, year, month);
+    await audit(user, "DELETE_MONTH_LEDGER", "ExpenseLedger", `${year}-${month}`, `Deleted ${result.count} entries for ${month}/${year}`);
+    res.json({ ok: true, count: result.count });
+  } catch (err) {
+    reportDbError(err);
+    res.status(500).json({ error: "Failed to delete month ledger entries" });
+  }
+});
+
 router.get("/expense-categories", requireAuth("finance"), async (req, res) => {
   const entity = getEntity(req);
   const entityLabel = entity === "RVBC" ? "RVBC (Voluntary Blood Centre)" : "Rithanya Hospital";
@@ -511,40 +527,142 @@ router.get("/expense-categories", requireAuth("finance"), async (req, res) => {
 
 router.get("/finance-overview", requireAuth("finance"), async (req, res) => {
   const entity = getEntity(req);
+  const entityLabel = entity === "RVBC" ? "RVBC (Voluntary Blood Centre)" : "Rithanya Hospital";
   try {
-    const entries = await loadLedgerEntries(entity);
-    const byMonth = new Map<string, { credit: number; debit: number }>();
-    for (const e of entries) {
-      const k = new Date(e.entryDate).toISOString().slice(0, 7);
-      const cur = byMonth.get(k) ?? { credit: 0, debit: 0 };
-      if (e.type === "CREDIT") cur.credit += e.amount;
-      else cur.debit += e.amount;
-      byMonth.set(k, cur);
+    const [entries, allCategories] = await Promise.all([
+      loadLedgerEntries(entity),
+      loadExpenseCategories(entity),
+    ]);
+
+    // Build the 12 rolling months window (current month and past 11 months)
+    const now = new Date();
+    const rollingMonths: { key: string; name: string; year: number; month: number }[] = [];
+    const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const key = `${y}-${String(m).padStart(2, "0")}`;
+      const name = `${MONTH_SHORT[m - 1]} ${y}`;
+      rollingMonths.push({ key, name, year: y, month: m });
     }
-    const months = Array.from(byMonth.entries()).sort().slice(-6).map(([month, v]) => ({ month, ...v, net: v.credit - v.debit }));
-    const byCategory = new Map<string, number>();
-    for (const e of entries) {
-      if (e.type !== "DEBIT") continue;
-      const k = (e as any).categoryName ?? "Uncategorised";
-      byCategory.set(k, (byCategory.get(k) ?? 0) + e.amount);
+
+    const monthMap = new Map<string, { credit: number; debit: number; itemCount: number; categorySpend: Record<string, number> }>();
+    for (const rm of rollingMonths) {
+      monthMap.set(rm.key, { credit: 0, debit: 0, itemCount: 0, categorySpend: {} });
     }
-    const totalCredit = entries.filter((e) => e.type === "CREDIT").reduce((s, e) => s + e.amount, 0);
-    const totalDebit = entries.filter((e) => e.type === "DEBIT").reduce((s, e) => s + e.amount, 0);
+
+    const catSpendTotal = new Map<string, number>();
+    const catTopItem = new Map<string, { itemName: string; amount: number }>();
+
+    for (const e of entries) {
+      const d = new Date(e.entryDate);
+      if (isNaN(d.getTime())) continue;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const mData = monthMap.get(key);
+      if (!mData) continue; // outside 12-month window
+
+      mData.itemCount += 1;
+      if (e.type === "CREDIT") {
+        mData.credit += e.amount;
+      } else {
+        mData.debit += e.amount;
+        const catName = e.categoryName || "Uncategorised";
+        mData.categorySpend[catName] = (mData.categorySpend[catName] ?? 0) + e.amount;
+        catSpendTotal.set(catName, (catSpendTotal.get(catName) ?? 0) + e.amount);
+
+        const curTop = catTopItem.get(catName);
+        if (!curTop || e.amount > curTop.amount) {
+          catTopItem.set(catName, { itemName: e.itemName, amount: e.amount });
+        }
+      }
+    }
+
+    const months = rollingMonths.map((rm) => {
+      const d = monthMap.get(rm.key)!;
+      return {
+        monthKey: rm.key,
+        name: rm.name,
+        year: rm.year,
+        month: rm.month,
+        credit: d.credit,
+        debit: d.debit,
+        net: d.credit - d.debit,
+        itemCount: d.itemCount,
+        categorySpend: d.categorySpend,
+      };
+    });
+
+    const totalCredit = months.reduce((s, m) => s + m.credit, 0);
+    const totalDebit = months.reduce((s, m) => s + m.debit, 0);
+    const net = totalCredit - totalDebit;
+    const profitMargin = totalCredit > 0 ? Math.round(((totalCredit - totalDebit) / totalCredit) * 1000) / 10 : 0;
+    const activeDebitMonths = months.filter((m) => m.debit > 0).length || 1;
+    const monthlyAverageSpend = Math.round(totalDebit / activeDebitMonths);
+
+    // Harmonious distinct colors for categories
+    const PALETTE = [
+      "#2563EB", // Royal Blue (Payroll)
+      "#0D9488", // Teal
+      "#D97706", // Amber
+      "#7C3AED", // Violet
+      "#DC2626", // Crimson
+      "#0284C7", // Sky
+      "#EA580C", // Orange
+      "#4F46E5", // Indigo
+      "#DB2777", // Pink
+      "#65A30D", // Lime
+      "#059669", // Emerald
+      "#4B5563", // Slate
+    ];
+
+    // Ensure all categories from expense-categories are included
+    const categoryNames = Array.from(new Set([
+      ...allCategories.map((c) => c.name),
+      ...Array.from(catSpendTotal.keys()),
+    ])).filter(Boolean);
+
+    const byCategory = categoryNames.map((name, idx) => {
+      const total = catSpendTotal.get(name) ?? 0;
+      const percentage = totalDebit > 0 ? Math.round((total / totalDebit) * 1000) / 10 : 0;
+      const color = name.toLowerCase() === "payroll" ? "#2563EB" : PALETTE[(idx + 1) % PALETTE.length];
+      const monthlyTrend = months.map((m) => m.categorySpend[name] ?? 0);
+      const top = catTopItem.get(name);
+      return {
+        name,
+        total,
+        percentage,
+        color,
+        monthlyTrend,
+        topItem: top?.itemName ?? "—",
+      };
+    }).sort((a, b) => b.total - a.total);
+
     res.json({
-      totals: { credit: totalCredit, debit: totalDebit, net: totalCredit - totalDebit },
+      totals: {
+        credit: totalCredit,
+        debit: totalDebit,
+        net,
+        profitMargin,
+        monthlyAverageSpend,
+        activeCategoriesCount: byCategory.filter((c) => c.total > 0).length,
+      },
       months,
-      byCategory: Array.from(byCategory.entries()).map(([name, total]) => ({ name, total })),
+      byCategory,
       retention: retentionState,
       entity,
+      entityLabel,
     });
   } catch (err) {
     reportDbError(err);
     res.json({
-      totals: { credit: 0, debit: 0, net: 0 },
+      totals: { credit: 0, debit: 0, net: 0, profitMargin: 0, monthlyAverageSpend: 0, activeCategoriesCount: 0 },
       months: [],
       byCategory: [],
       retention: retentionState,
       entity,
+      entityLabel,
     });
   }
 });
