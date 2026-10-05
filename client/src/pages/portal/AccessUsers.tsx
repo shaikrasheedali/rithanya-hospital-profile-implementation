@@ -24,14 +24,14 @@ export default function AccessUsersPage() {
 
   return (
     <CrudManager
-      title="User accounts"
+      title={isSuperadmin ? "User accounts" : "Staff accounts"}
       desc={
         isSuperadmin
           ? "Superadmin management: Create and manage Admin and Staff accounts."
-          : "Admin management: Create and manage Staff accounts."
+          : "Admin management: Create and manage Staff accounts and credentials."
       }
       resource="users"
-      singular="User"
+      singular={isSuperadmin ? "User" : "Staff Account"}
       rows={data.items}
       defaults={{ role: "STAFF", isActive: true }}
       columns={[
@@ -41,7 +41,9 @@ export default function AccessUsersPage() {
           key: "role",
           label: "Role",
           kind: "badge",
-          tone: { SUPERADMIN: "purple", ADMIN: "blue", STAFF: "slate" },
+          tone: isSuperadmin
+            ? { SUPERADMIN: "purple", ADMIN: "blue", STAFF: "slate" }
+            : { ADMIN: "blue", STAFF: "slate" },
         },
         { key: "isActive", label: "Status", kind: "bool" },
       ]}

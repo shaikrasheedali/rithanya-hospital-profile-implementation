@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, MapPin, Phone, Radio } from "lucide-react";
+import { ChevronDown, MapPin, Phone, Radio, Trash2 } from "lucide-react";
 import { Badge, Btn, Card, Empty, PageHeader, api, inputCls, useToast } from "@/components/portal/ui";
 import { formatDate, formatINR } from "@/lib/utils";
 
@@ -28,6 +28,20 @@ export function OrdersDesk({ orders }: { orders: OrderDTO[] }) {
     toast(`Order marked ${status.toLowerCase()}`);
     setTimeout(() => window.location.reload(), 1200);
   }
+
+  async function deleteOrderRecord(id: string, orderNumber: string) {
+    if (!window.confirm(`Are you sure you want to permanently delete order ${orderNumber}? This action cannot be undone.`)) {
+      return;
+    }
+    setBusyId(id);
+    const r = await api(`/api/portal/r/orders/${id}`, "DELETE");
+    setBusyId(null);
+    if (!r.ok) return toast(r.error || "Delete failed — please try again.", "err");
+    toast(`Order ${orderNumber} deleted successfully.`);
+    setOpenId(null);
+    setTimeout(() => window.location.reload(), 1000);
+  }
+
   const list = (orders ?? []).filter((o) => f === "ALL" || o.status === f);
 
   return (
@@ -54,7 +68,29 @@ export function OrdersDesk({ orders }: { orders: OrderDTO[] }) {
                       <span className="flex flex-wrap items-center gap-2 text-lg font-semibold text-navy">{o.orderNumber} <Badge tone={TONE[o.status]}>{o.status}</Badge> <Badge>{o.paymentMethod}</Badge></span>
                       <span className="text-base text-ink/75">{o.customerName} · {formatDate(o.createdAt, true)}</span>
                     </span>
-                    <span className="flex items-center gap-3"><span className="font-heading text-xl font-bold text-navy">{formatINR(o.totalAmount)}</span><ChevronDown className={`h-5 w-5 transition-transform ${open ? "rotate-180" : ""}`} /></span>
+                    <span className="flex items-center gap-2.5">
+                      <span className="font-heading text-xl font-bold text-navy">{formatINR(o.totalAmount)}</span>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        title={`Delete order ${o.orderNumber}`}
+                        aria-label={`Delete order ${o.orderNumber}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteOrderRecord(o.id, o.orderNumber);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.stopPropagation();
+                            deleteOrderRecord(o.id, o.orderNumber);
+                          }
+                        }}
+                        className="rounded-lg p-2 text-ink/40 transition-colors hover:bg-alert/10 hover:text-alert"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </span>
+                      <ChevronDown className={`h-5 w-5 transition-transform ${open ? "rotate-180" : ""}`} />
+                    </span>
                   </button>
                   {open && (
                     <div className="grid gap-6 border-t border-line bg-canvas/50 p-5 lg:grid-cols-2">
@@ -77,6 +113,7 @@ export function OrdersDesk({ orders }: { orders: OrderDTO[] }) {
                             {[...FLOW, "CANCELLED"].map((s) => <option key={s}>{s}</option>)}
                           </select>
                           {o.status !== "CANCELLED" && o.status !== "DELIVERED" && <Btn variant="danger" onClick={() => confirm("Cancel this order and restore stock?") && setStatus(o.id, "CANCELLED")}>Cancel order</Btn>}
+                          <Btn variant="danger" onClick={() => deleteOrderRecord(o.id, o.orderNumber)} className="flex items-center gap-1.5"><Trash2 className="h-4 w-4" /> Delete order</Btn>
                         </div>
                       </div>
                     </div>

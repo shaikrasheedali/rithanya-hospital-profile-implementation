@@ -280,3 +280,24 @@ export async function updateOrderStatus(id: string, status: string): Promise<voi
     });
   }
 }
+
+export async function deleteOrder(id: string): Promise<void> {
+  const idx = inMemoryOrders.findIndex((x) => x.id === id);
+  if (idx < 0) throw new Error("Order not found");
+  inMemoryOrders.splice(idx, 1);
+  persistCache();
+
+  if (!isDbOnCooldown()) {
+    withDbTimeout(
+      prisma.$transaction(async (tx) => {
+        await tx.orderItem.deleteMany({ where: { orderId: id } });
+        await tx.order.delete({ where: { id } });
+      }),
+      3000
+    ).catch((err) => {
+      reportDbError(err);
+      console.warn("[orders] Background DB order delete failed:", err?.message || err);
+    });
+  }
+}
+

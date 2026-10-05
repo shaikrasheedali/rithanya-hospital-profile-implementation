@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Clock, Mail, MapPin, MessageCircle, Phone } from "lucide-react";
-import { PageHero } from "@/components/site/ui";
+import { PageHero, SafeImg } from "@/components/site/ui";
 import { AppointmentForm } from "@/components/site/BookingProvider";
 import { prettyPhone, telHref } from "@/lib/utils";
 import { useSiteSettings } from "@/lib/settingsContext";
@@ -64,6 +64,24 @@ export default function ContactPage() {
                 </li>
               )}
             </ul>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <div className="overflow-hidden rounded-lg border border-line bg-canvas">
+                <SafeImg
+                  src="/seed/rithanya-hospital-khammam-building-exterior-signboard.webp"
+                  alt="Rithanya Hospital Building Exterior Signboard on Wyra Road"
+                  className="h-32 w-full object-cover"
+                />
+                <p className="p-1.5 text-center text-xs font-semibold text-navy">Wyra Road Building</p>
+              </div>
+              <div className="overflow-hidden rounded-lg border border-line bg-canvas">
+                <SafeImg
+                  src="/seed/rithanya-hospital-khammam-main-entrance-reception.webp"
+                  alt="Rithanya Hospital Main Entrance & Reception"
+                  className="h-32 w-full object-cover"
+                />
+                <p className="p-1.5 text-center text-xs font-semibold text-navy">Entrance & Reception</p>
+              </div>
+            </div>
             <iframe title="Map" src="https://www.google.com/maps?q=17.2486,80.1473&z=16&output=embed" className="mt-6 h-72 w-full rounded-xl border border-line" loading="lazy" />
           </div>
           <div className="rounded-xl border border-line bg-white p-8 shadow-sm">

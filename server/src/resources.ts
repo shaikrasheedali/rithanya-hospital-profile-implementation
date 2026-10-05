@@ -23,7 +23,7 @@ import {
   updateClinicalCategory,
   deleteClinicalCategory,
 } from "./emr.js";
-import { updateOrderStatus } from "./orders.js";
+import { updateOrderStatus, deleteOrder } from "./orders.js";
 import {
   createEmployeeRecord,
   updateEmployeeRecord,
@@ -317,6 +317,16 @@ const orders: Handler = {
       throw new ApiError(e?.message || "Order update failed", 400);
     }
     await audit(user, "ORDER_STATUS", "Order", id, status);
+    return { ok: true };
+  },
+  async remove({ user, id }) {
+    try {
+      await deleteOrder(id!);
+    } catch (e: any) {
+      if (e?.message === "Order not found") throw new ApiError("Order not found", 404);
+      throw new ApiError(e?.message || "Order deletion failed", 400);
+    }
+    await audit(user, "DELETE_ORDER", "Order", id);
     return { ok: true };
   },
 };

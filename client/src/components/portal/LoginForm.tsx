@@ -49,7 +49,7 @@ export function LoginForm() {
           <p className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-gold">Hospital management system</p>
           <h1 className="max-w-lg text-5xl font-semibold leading-tight tracking-tight !text-white">Care, records and operations — in one secure place.</h1>
           <ul className="mt-8 space-y-3 text-lg text-white/85">
-            {["Role-based access: Superadmin, Admin, Staff", "EMR fields encrypted at rest with AES-256-GCM", "Argon2id-hashed credentials, audit-logged actions"].map((t) => (
+            {["Role-based hospital staff access", "EMR fields encrypted at rest with AES-256-GCM", "Argon2id-hashed credentials, audit-logged actions"].map((t) => (
               <li key={t} className="flex gap-3"><ShieldCheck className="mt-1 h-5 w-5 flex-none text-gold" />{t}</li>
             ))}
           </ul>
@@ -92,15 +92,6 @@ export function LoginForm() {
             {error && <p role="alert" className="rounded-lg bg-alert/10 p-3 text-base font-medium text-alert">{error}</p>}
             <button disabled={busy} className="w-full rounded-lg bg-royal px-6 py-3.5 text-lg font-semibold text-white hover:bg-navy disabled:opacity-60">{busy ? "Signing in…" : "Sign in"}</button>
           </form>
-          <details className="mt-8 rounded-xl border border-line bg-white p-4 text-base">
-            <summary className="cursor-pointer font-semibold text-navy">Demo accounts</summary>
-            <ul className="mt-3 space-y-1.5 text-ink/80">
-              <li><strong>superadmin</strong> / Rithanya@2026 — everything</li>
-              <li><strong>admin</strong> / Admin@2026 — CMS, HR, finance, DPDP, staff users</li>
-              <li><strong>staff</strong> / Staff@2026 — EMR, blood bank, store</li>
-            </ul>
-            <p className="mt-2 text-sm text-ink/60">Change these passwords after first sign-in (Access control → User accounts).</p>
-          </details>
         </div>
       </div>
     </div>

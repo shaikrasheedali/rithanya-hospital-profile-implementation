@@ -9,3 +9,4 @@ server/public/
 .DS_Store
 .env
 !*.example
+Medical_vessel_enters_studio_screen_*.mp4

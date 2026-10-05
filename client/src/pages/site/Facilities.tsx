@@ -171,7 +171,15 @@ export default function FacilitiesPage() {
           <div className="flex flex-col items-start justify-between gap-6 lg:flex-row lg:items-center">
             <div>
               <p className="text-sm font-semibold uppercase tracking-widest text-gold">Patient Assistance Desk</p>
-              <h2 className="mt-1 font-heading text-2xl font-bold tracking-tight sm:text-3xl">
+              <h2
+                className="mt-1 font-heading text-2xl font-bold tracking-tight sm:text-3xl"
+                style={{
+                  background: "linear-gradient(90deg, #FF7043 0%, #F44336 45%, #FDD835 100%)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  display: "inline-block",
+                }}
+              >
                 Need urgent care or scheduling a transfusion?
               </h2>
               <p className="mt-2 max-w-2xl text-white/80">

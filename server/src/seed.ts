@@ -6,6 +6,12 @@ import { encryptField, encryptJson } from "./crypto.js";
 import { setEntityMedia, registerAssetInMemory, type EntityType } from "./media.js";
 import { DEFAULT_SETTINGS } from "./settings.js";
 import { slugify } from "./utils.js";
+import {
+  FALLBACK_SPECIALTIES,
+  FALLBACK_SERVICES,
+  FALLBACK_TREATMENTS,
+  FALLBACK_FACILITIES,
+} from "./fallbackData.js";
 
 function seedDirCandidate(): string {
   // Prefer original Next.js public/seed if present (sibling project), else local assets.
@@ -23,6 +29,29 @@ const FILES: Array<[string, "IMAGE" | "VIDEO"]> = [
     "blood-donation", "blood-bag", "blood-beds", "glucose-finger", "glucose-strips", "glucose-meter", "lab-microscope",
     "lab-woman", "lab-notes", "pharmacy-shelves", "pharmacy-bottle", "pharmacy-counter", "nurse-injection", "nurse-bp",
     "nurse-care", "ward-exam", "logo-pmjay", "logo-aarogyasri", "logo-tpa",
+    "rithanya-hospital-khammam-building-exterior-signboard",
+    "rithanya-hospital-khammam-main-entrance-reception",
+    "rithanya-hospital-khammam-outpatient-waiting-area-registration",
+    "rithanya-hospital-khammam-doctor-consulting-patient",
+    "rithanya-hospital-khammam-doctor-in-consultation-room",
+    "rithanya-hospital-khammam-surgeon-reviewing-xray-reports",
+    "rithanya-hospital-khammam-child-gifted-plant-with-doctor",
+    "rithanya-hospital-khammam-childrens-day-celebration-group-photo",
+    "rithanya-hospital-khammam-health-camp-registration-desk",
+    "rithanya-hospital-khammam-rotary-blood-donation-camp-stage",
+    "rithanya-hospital-khammam-blood-bank-officials-donor-registration",
+    "rithanya-hospital-khammam-blood-donation-couch-donor",
+    "rithanya-hospital-khammam-blood-donation-banner-awareness",
+    "rithanya-hospital-khammam-thalassemia-camp-chief-guest-stage",
+    "rithanya-hospital-khammam-newspaper-eenadu-thalassemia-transfusion-camp",
+    "rithanya-hospital-khammam-newspaper-surya-world-thalassemia-day",
+    "rithanya-hospital-khammam-newspaper-bhadrachalam-camp-blood-transfusion",
+    "rithanya-hospital-khammam-newspaper-district-blood-donation-awareness",
+    "rithanya-hospital-khammam-newspaper-blood-donation-camp-coverage",
+    "rithanya-hospital-khammam-newspaper-thalassemia-society-appreciation",
+    "rithanya-hospital-khammam-newspaper-pediatric-thalassemia-support",
+    "rithanya-hospital-khammam-newspaper-rotary-club-blood-camp",
+    "rithanya-hospital-khammam-newspaper-community-health-camp-report",
   ].map((n) => [`${n}.webp`, "IMAGE"] as [string, "IMAGE"]),
   ["clip-iv-drip.mp4", "VIDEO"],
 ];
@@ -174,9 +203,8 @@ export async function ensureSeed() {
 
   // 1. Demo accounts
   const accounts: Array<[string, string, string, "SUPERADMIN" | "ADMIN" | "STAFF", string]> = [
-    ["superadmin", "superadmin@rithanyahospital.com", "Hospital Superadmin", "SUPERADMIN", "Rithanya@2026"],
-    ["admin", "admin@rithanyahospital.com", "Administration Desk", "ADMIN", "Admin@2026"],
-    ["staff", "staff@rithanyahospital.com", "Nursing Station Staff", "STAFF", "Staff@2026"],
+    ["superadmin", "mgrhameed@gmail.com", "Hospital Superadmin", "SUPERADMIN", "Hameed@2026"],
+    ["admin", "admin@rithanyahospital.com", "Administration Desk", "ADMIN", "Rithanya@2026"],
   ];
   for (const [username, email, fullName, role, pw] of accounts) {
     const passwordHash = await hashPassword(pw);
@@ -223,112 +251,83 @@ export async function ensureSeed() {
     });
   }
 
-  // 2. Specialties
+  function mediaIdsFor(mediaList: Array<{ originalName: string }>, mediaMap: Record<string, string>): string[] {
+    return (mediaList || []).map((x) => mediaMap[x.originalName.replace(/\.(webp|mp4)$/, "")]).filter(Boolean);
+  }
+
+  // 2. Specialties (4 items)
   const specialtyCount = await prisma.specialty.count();
   if (specialtyCount === 0) {
-    await put((v) => prisma.specialty.create({ data: v as never }), "specialties", [
-      {
-        v: {
-          title: "Diabetology & Endocrinology",
-          shortSummary: "Comprehensive care for Type 1, Type 2 and gestational diabetes with HbA1c screening, complication prevention and long-term metabolic plans.",
-          contentHtml:
-            h("Diabetes care that goes beyond sugar numbers") +
-            p("Led by Dr. Narayana Murthy, M.D., our diabetology clinic manages Type 1, Type 2 and gestational diabetes with a focus on long-term control and prevention of complications.") +
-            ul(["Blood sugar monitoring and HbA1c screening", "Diabetic neuropathy and nephropathy prevention", "Personalised dietary guidance", "Long-term metabolic health plans for the whole family"]),
+    for (const spec of FALLBACK_SPECIALTIES) {
+      const inserted = await prisma.specialty.create({
+        data: {
+          title: spec.title,
+          slug: spec.slug,
+          shortSummary: spec.shortSummary,
+          contentHtml: spec.contentHtml,
+          sortOrder: spec.sortOrder,
         },
-        media: [m["glucose-finger"], m["glucose-meter"]],
-      },
-      {
-        v: {
-          title: "General & Internal Medicine",
-          shortSummary: "Prompt diagnosis and treatment of fevers, infections, hypertension, respiratory illness, abdominal pain, headaches and migraines.",
-          contentHtml:
-            h("Everyday and acute illness, handled with care") +
-            p("Our general physicians treat viral fevers, malaria, dengue, typhoid and seasonal infections, alongside chronic conditions such as hypertension.") +
-            ul(["Acute illness management", "Hypertension and respiratory infections", "Abdominal pain, headaches and migraines", "Observation beds and hydration therapy"]),
-        },
-        media: [m["doctor-consult"], m["doctor-exam"]],
-      },
-      {
-        v: {
-          title: "Thalassemia & Sickle Cell Daycare",
-          shortSummary: "Our flagship daycare transfusion centre: safe red cell transfusions, iron chelation monitoring and family counselling for children and adults.",
-          contentHtml:
-            h("A humanitarian daycare wing for hemoglobinopathies") +
-            p("The Thalassemia and Sickle Cell Daycare Transfusion Centre provides routine blood transfusions and supportive care for patients with Thalassemia Major and Sickle Cell Disease, in a calm and sanitised daycare setting.") +
-            ul(["Safe red cell transfusions", "Iron chelation monitoring", "Regular blood parameter tracking", "Moral support and family counselling"]),
-        },
-        media: [m["blood-beds"], m["blood-donation"], m["blood-bag"]],
-      },
-      {
-        v: {
-          title: "Diagnostics & Pathology",
-          shortSummary: "Routine blood panels, biochemical tests and senior citizen wellness profiles with fast, accurate reporting.",
-          contentHtml: h("Reliable results, quickly") + p("In-house diagnostics support every department — from HbA1c and blood counts to full biochemical panels.") + ul(["Routine blood panels", "Biochemical tests", "Senior citizen wellness profiles"]),
-        },
-        media: [m["lab-microscope"], m["lab-woman"]],
-      },
-      {
-        v: {
-          title: "Senior Citizen Wellness",
-          shortSummary: "Dedicated health checkup profiles designed for older adults, with unhurried consultations and accessible facilities.",
-          contentHtml: h("Healthy ageing, supported") + p("Wheelchair-accessible entrances, ramps and wide corridors make visits comfortable for senior citizens, who also receive dedicated wellness profiles.") + ul(["Senior wellness profile", "Blood pressure, sugar and cholesterol review", "Medication reconciliation"]),
-        },
-        media: [m["nurse-bp"], m["nurse-care"]],
-      },
-      {
-        v: {
-          title: "Visiting Specialties",
-          shortSummary: "Consulting specialists in obstetrics & gynaecology, reproductive medicine and minimal access surgery, plus visiting physiotherapists and general surgeons.",
-          contentHtml: h("Extended specialist access") + p("Visiting consultants extend the hospital's reach into women's health, reproductive medicine and surgical care. Call ahead for schedules."),
-        },
-        media: [m["ward-exam"]],
-      },
-    ], "title");
+      });
+      const mediaIds = mediaIdsFor(spec.media, m);
+      if (mediaIds.length) await setEntityMedia("specialties", inserted.id, mediaIds);
+    }
   }
 
-  // 3. Treatments
+  // 3. Treatments & Conditions Managed (40 items)
   const treatmentCount = await prisma.treatment.count();
   if (treatmentCount === 0) {
-    await put((v) => prisma.treatment.create({ data: v as never }), "treatments", [
-      {
-        v: { title: "Thalassemia Major Transfusion Care", category: "Blood Disorders", isFlagship: true, shortSummary: "Regular, safe red cell transfusions with iron-chelation monitoring and counselling in a dedicated daycare.", contentHtml: h("What to expect") + p("Each visit includes pre-transfusion checks, matched blood, bedside monitoring and post-transfusion guidance. Hemoglobin and ferritin are tracked over time so that your care plan stays on target.") + ul(["Matched, screened blood units", "Iron chelation monitoring", "Growth and blood parameter tracking", "Family counselling"]) },
-        media: [m["blood-beds"], m["blood-bag"]],
-      },
-      {
-        v: { title: "Sickle Cell Disease Management", category: "Blood Disorders", isFlagship: true, shortSummary: "Supportive care, transfusion support and crisis-prevention guidance for children and adults living with sickle cell disease.", contentHtml: h("Supportive and preventive care") + p("We combine regular review, hydration therapy, transfusion when indicated and education on triggers so patients can avoid painful crises.") },
-        media: [m["blood-donation"], m["nurse-injection"]],
-      },
-      {
-        v: { title: "Diabetes Management (Type 1, Type 2 & Gestational)", category: "Diabetes & Endocrine", isFlagship: true, shortSummary: "Evidence-based diabetes care: sugar control, HbA1c tracking, diet planning and screening for neuropathy and nephropathy.", contentHtml: h("A plan built around you") + p("Treatment is tailored by Dr. Narayana Murthy and includes medication review, glucose monitoring education and diet and lifestyle plans.") + ul(["HbA1c screening", "Neuropathy and nephropathy prevention", "Diet and lifestyle plan", "Gestational diabetes support"]) },
-        media: [m["glucose-strips"], m["glucose-finger"]],
-      },
-      {
-        v: { title: "Fever & Seasonal Infection Care", category: "Infectious Diseases", shortSummary: "Diagnosis and treatment of viral fevers, malaria, dengue, typhoid and other seasonal infections.", contentHtml: h("Fast diagnosis, early treatment") + p("Same-day tests and observation beds help us treat infections quickly and monitor high-risk patients closely.") },
-        media: [m["doctor-vitals"]],
-      },
-      {
-        v: { title: "Hypertension & Respiratory Care", category: "General Medicine", shortSummary: "Long-term blood pressure control and treatment of respiratory infections, headaches and migraines.", contentHtml: h("Control that lasts") + p("Regular review, medication optimisation and lifestyle advice keep blood pressure within target.") },
-        media: [m["nurse-bp"]],
-      },
-      {
-        v: { title: "Wound Care & Minor Procedures", category: "Diagnostics & Wellness", shortSummary: "Wound suturing, sterile dressing, hydration therapy and short-stay observation.", contentHtml: h("Safe, sterile, same-day") + p("Minor procedures are performed under sterile conditions with observation beds available for recovery.") },
-        media: [m["nurse-injection"], m["ward-exam"]],
-      },
-    ], "title");
+    for (const tr of FALLBACK_TREATMENTS) {
+      const inserted = await prisma.treatment.create({
+        data: {
+          title: tr.title,
+          slug: tr.slug,
+          category: tr.category,
+          isFlagship: tr.isFlagship,
+          shortSummary: tr.shortSummary,
+          contentHtml: tr.contentHtml,
+          sortOrder: tr.sortOrder,
+        },
+      });
+      const mediaIds = mediaIdsFor(tr.media, m);
+      if (mediaIds.length) await setEntityMedia("treatments", inserted.id, mediaIds);
+    }
   }
 
-  // 4. Services
+  // 4. Services (4 items)
   const serviceCount = await prisma.service.count();
   if (serviceCount === 0) {
-    await put((v) => prisma.service.create({ data: v as never }), "services", [
-      { v: { title: "Daycare Transfusion Unit", category: "Daycare", shortSummary: "Comfortable daycare beds for scheduled transfusions, with nurses at the bedside throughout.", contentHtml: h("Designed for repeat visits") + p("Clean waiting lounges, observation beds and attentive nursing make recurring transfusions easier for families.") }, media: [m["blood-beds"], m["clip-iv-drip"]] },
-      { v: { title: "Lab Diagnostics", category: "Diagnostics", shortSummary: "Routine blood panels, biochemistry and HbA1c with dependable turnaround.", contentHtml: h("Tests you can trust") + p("Our lab supports every clinic and provides health checkup profiles.") }, media: [m["lab-microscope"], m["lab-notes"]] },
-      { v: { title: "24/7 Pharmacy", category: "Pharmacy", shortSummary: "Round-the-clock pharmacy with digital payment support and home delivery through our online store.", contentHtml: h("Medicines when you need them") + p("Order wellness and diabetes-care products online from the Pharmacy page and pay by cash on delivery or UPI.") }, media: [m["pharmacy-shelves"], m["pharmacy-counter"]] },
-      { v: { title: "Emergency & Observation Beds", category: "Emergency", shortSummary: "Open 24 hours for inpatient, daycare and urgent care, with observation beds and hydration therapy.", contentHtml: h("Always open") + p("Call +91 83285 81019 for urgent care. Our team is available around the clock.") }, media: [m["ward-exam"], m["nurse-care"]] },
-      { v: { title: "Senior Citizen Health Checkups", category: "Outpatient", shortSummary: "Wellness profiles for older adults with unhurried consultations.", contentHtml: h("Preventive care for seniors") + p("Includes blood panels, biochemical tests and physician review.") }, media: [m["nurse-bp"]] },
-      { v: { title: "Ayushman Bharat Cashless Desk", category: "Outpatient", shortSummary: "Dedicated assistance for PM-JAY and other public healthcare scheme paperwork and cashless admissions.", contentHtml: h("Help with paperwork") + p("Our desk guides you through eligibility, documents and pre-authorisation.") }, media: [m["hospital-corridor"]] },
-    ], "title");
+    for (const serv of FALLBACK_SERVICES) {
+      const inserted = await prisma.service.create({
+        data: {
+          title: serv.title,
+          slug: serv.slug,
+          category: serv.category,
+          shortSummary: serv.shortSummary,
+          contentHtml: serv.contentHtml,
+          sortOrder: serv.sortOrder,
+        },
+      });
+      const mediaIds = mediaIdsFor(serv.media, m);
+      if (mediaIds.length) await setEntityMedia("services", inserted.id, mediaIds);
+    }
+  }
+
+  // 4b. Facilities
+  const facilityCount = await prisma.facility.count();
+  if (facilityCount === 0) {
+    for (const fac of FALLBACK_FACILITIES) {
+      const inserted = await prisma.facility.create({
+        data: {
+          title: fac.title,
+          slug: fac.slug,
+          shortSummary: fac.shortSummary,
+          contentHtml: fac.contentHtml,
+          sortOrder: fac.sortOrder,
+        },
+      });
+      const mediaIds = mediaIdsFor(fac.media, m);
+      if (mediaIds.length) await setEntityMedia("facilities", inserted.id, mediaIds);
+    }
   }
 
   // 5. Doctors

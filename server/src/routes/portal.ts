@@ -280,7 +280,7 @@ router.get("/r/:resource", requireAuth(), async (req, res) => {
         return;
       }
       case "users": {
-        const users = await loadUsersList();
+        const users = await loadUsersList(user);
         res.json({ items: users });
         return;
       }
@@ -680,9 +680,10 @@ router.get("/dpdp-requests", requireAuth("dpdp"), async (_req, res) => {
   }
 });
 
-router.get("/users", requireAuth("access"), async (_req, res) => {
+router.get("/users", requireAuth("access"), async (req, res) => {
+  const user = getUser(req);
   try {
-    const users = await loadUsersList();
+    const users = await loadUsersList(user);
     res.json({ items: users });
   } catch (err) {
     reportDbError(err);

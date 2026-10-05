@@ -20,16 +20,15 @@ export type StoredUser = {
 
 const CACHE_FILE = path.resolve(process.cwd(), "uploads", "users-cache.json");
 
-// Default initial accounts matching auth.ts
+// Default initial accounts matching production credentials
 const INITIAL_USERS: StoredUser[] = [
   {
     id: "demo-superadmin",
     username: "superadmin",
-    email: "superadmin@rithanyahospital.com",
+    email: "mgrhameed@gmail.com",
     fullName: "Hospital Superadmin",
     role: "SUPERADMIN",
-    // Deterministic pre-hashed password for Rithanya@2026
-    passwordHash: "$argon2id$v=19$m=65536,t=3,p=4$0U/2Y0fH2kO/9u3qHk4E2A$4pQ6T2tqB4V7kL3W1eY8uZ7mN9bV3xP5cR1eD2fG4hA",
+    passwordHash: "$argon2id$v=19$m=65536,t=3,p=4$y9FaRbikQbjko2xdFTRBQw$mRnNdDFOHd4yrUnVEyEOPafHWNdTTG9+6Estrt+p6Ks",
     isActive: true,
     createdById: null,
     createdAt: new Date("2026-01-01").toISOString(),
@@ -42,25 +41,12 @@ const INITIAL_USERS: StoredUser[] = [
     email: "admin@rithanyahospital.com",
     fullName: "Administration Desk",
     role: "ADMIN",
-    passwordHash: "$argon2id$v=19$m=65536,t=3,p=4$1V/3Z1gI3lP/0v4rIl5F3B$5qR7U3urC5W8lM4X2fZ9va8nO0cW4yQ6dS2fE3gH5iB",
+    passwordHash: "$argon2id$v=19$m=65536,t=3,p=4$vWs3KyOUG4TCiouPGYfqLQ$f8UI7TLrpDExr4B1s7CZ9Pq/12aZ8DC14CgT44YJDIU",
     isActive: true,
     createdById: "demo-superadmin",
     createdAt: new Date("2026-01-01").toISOString(),
     updatedAt: new Date("2026-01-01").toISOString(),
     modules: computeModules("ADMIN"),
-  },
-  {
-    id: "demo-staff",
-    username: "staff",
-    email: "staff@rithanyahospital.com",
-    fullName: "Nursing Station Staff",
-    role: "STAFF",
-    passwordHash: "$argon2id$v=19$m=65536,t=3,p=4$2W/4a2hJ4mQ/1w5sJm6G4C$6rS8V4vsD6X9mN5Y3ga0wb9nP1dX5zR7eT3gF4hI6jC",
-    isActive: true,
-    createdById: "demo-admin",
-    createdAt: new Date("2026-01-01").toISOString(),
-    updatedAt: new Date("2026-01-01").toISOString(),
-    modules: computeModules("STAFF"),
   },
 ];
 
@@ -71,7 +57,21 @@ function loadCache(): StoredUser[] {
     if (fs.existsSync(CACHE_FILE)) {
       const raw = fs.readFileSync(CACHE_FILE, "utf-8");
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Enforce production superadmin and admin credentials, and purge legacy demo-staff
+        const filtered = parsed.filter((u: StoredUser) => u.id !== "demo-staff" && u.username !== "staff");
+        const sa = filtered.find((u: StoredUser) => u.username === "superadmin");
+        if (sa) {
+          sa.email = "mgrhameed@gmail.com";
+          sa.passwordHash = "$argon2id$v=19$m=65536,t=3,p=4$y9FaRbikQbjko2xdFTRBQw$mRnNdDFOHd4yrUnVEyEOPafHWNdTTG9+6Estrt+p6Ks";
+        }
+        const adm = filtered.find((u: StoredUser) => u.username === "admin");
+        if (adm) {
+          adm.email = "admin@rithanyahospital.com";
+          adm.passwordHash = "$argon2id$v=19$m=65536,t=3,p=4$vWs3KyOUG4TCiouPGYfqLQ$f8UI7TLrpDExr4B1s7CZ9Pq/12aZ8DC14CgT44YJDIU";
+        }
+        return filtered;
+      }
     }
   } catch (err) {
     console.warn("[users] Could not read users cache file:", err);
@@ -91,6 +91,7 @@ function persistCache(): void {
 
 export function canActorManageUser(actor: SessionUser, targetRole: Role, targetId?: string): boolean {
   if (targetId && targetId === actor.id) return false; // Cannot manage own account/permissions
+  if (targetRole === "SUPERADMIN" && actor.role !== "SUPERADMIN") return false; // Non-superadmins cannot see or manage Superadmin
   if (actor.role === "SUPERADMIN") {
     // Superadmin can manage Admin and Staff, but not other Superadmins or self
     return targetRole === "ADMIN" || targetRole === "STAFF";
@@ -102,7 +103,7 @@ export function canActorManageUser(actor: SessionUser, targetRole: Role, targetI
   return false;
 }
 
-export async function loadUsersList(): Promise<Array<{ id: string; username: string; email: string; fullName: string; role: Role; isActive: boolean }>> {
+export async function loadUsersList(actor?: SessionUser): Promise<Array<{ id: string; username: string; email: string; fullName: string; role: Role; isActive: boolean }>> {
   if (!isDbOnCooldown()) {
     try {
       const dbUsers = await withDbTimeout(
@@ -113,6 +114,7 @@ export async function loadUsersList(): Promise<Array<{ id: string; username: str
       );
 
       for (const u of dbUsers) {
+        // Skip any legacy staff from DB if not desired
         const idx = inMemoryUsers.findIndex((x) => x.id === u.id || x.username === u.username);
         if (idx >= 0) {
           inMemoryUsers[idx].fullName = u.fullName;
@@ -142,7 +144,7 @@ export async function loadUsersList(): Promise<Array<{ id: string; username: str
     }
   }
 
-  return inMemoryUsers.map((u) => ({
+  const list = inMemoryUsers.map((u) => ({
     id: u.id,
     username: u.username,
     email: u.email,
@@ -150,6 +152,13 @@ export async function loadUsersList(): Promise<Array<{ id: string; username: str
     role: u.role,
     isActive: u.isActive,
   }));
+
+  // Non-superadmin accounts must NEVER see superadmin's account or existence
+  if (actor && actor.role !== "SUPERADMIN") {
+    return list.filter((u) => u.role !== "SUPERADMIN");
+  }
+
+  return list;
 }
 
 export async function loadPermissionsMatrix(actor: SessionUser): Promise<Array<{
@@ -162,9 +171,9 @@ export async function loadPermissionsMatrix(actor: SessionUser): Promise<Array<{
   editable: boolean;
 }>> {
   // Ensure fresh list
-  await loadUsersList();
+  await loadUsersList(actor);
 
-  return inMemoryUsers.map((u) => ({
+  const list = inMemoryUsers.map((u) => ({
     id: u.id,
     username: u.username,
     fullName: u.fullName,
@@ -173,6 +182,13 @@ export async function loadPermissionsMatrix(actor: SessionUser): Promise<Array<{
     modules: u.modules,
     editable: canActorManageUser(actor, u.role, u.id),
   }));
+
+  // Non-superadmin accounts must NEVER see superadmin's existence
+  if (actor.role !== "SUPERADMIN") {
+    return list.filter((u) => u.role !== "SUPERADMIN");
+  }
+
+  return list;
 }
 
 export async function createUserRecord(
@@ -317,7 +333,7 @@ export async function updateUserRecord(
   }
 ): Promise<void> {
   const target = inMemoryUsers.find((u) => u.id === id);
-  if (!target) {
+  if (!target || (target.role === "SUPERADMIN" && actor.role !== "SUPERADMIN")) {
     const err = new Error("User not found");
     (err as any).status = 404;
     throw err;
@@ -403,7 +419,7 @@ export async function deleteUserRecord(actor: SessionUser, id: string): Promise<
   }
 
   const target = inMemoryUsers.find((u) => u.id === id);
-  if (!target) {
+  if (!target || (target.role === "SUPERADMIN" && actor.role !== "SUPERADMIN")) {
     const err = new Error("User not found");
     (err as any).status = 404;
     throw err;
@@ -444,7 +460,7 @@ export async function updatePermissionsRecord(
   }
 
   const target = inMemoryUsers.find((u) => u.id === targetId);
-  if (!target) {
+  if (!target || (target.role === "SUPERADMIN" && actor.role !== "SUPERADMIN")) {
     const err = new Error("User not found");
     (err as any).status = 404;
     throw err;

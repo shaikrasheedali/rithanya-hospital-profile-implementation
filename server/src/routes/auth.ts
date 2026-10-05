@@ -53,7 +53,7 @@ router.post("/login", loginLimiter, async (req, res) => {
       return;
     }
     res.status(401).json({
-      error: "Invalid credentials. Use demo credentials (superadmin / Rithanya@2026, admin / Admin@2026, or staff / Staff@2026).",
+      error: "Invalid username or password",
     });
     return;
   }
@@ -100,7 +100,7 @@ router.post("/login", loginLimiter, async (req, res) => {
       return;
     }
     res.status(401).json({
-      error: "Invalid credentials. Use demo credentials (superadmin / Rithanya@2026, admin / Admin@2026, or staff / Staff@2026).",
+      error: "Invalid username or password",
     });
   }
 });

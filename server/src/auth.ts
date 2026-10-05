@@ -88,12 +88,10 @@ export function computeModules(role: Role, a?: AccessRow | null): Record<ModuleK
 }
 
 export const DEMO_ACCOUNTS: Record<string, { role: Role; pass: string; name: string; username: string; id: string }> = {
-  superadmin: { role: "SUPERADMIN", pass: "Rithanya@2026", name: "Hospital Superadmin", username: "superadmin", id: "demo-superadmin" },
-  "superadmin@rithanyahospital.com": { role: "SUPERADMIN", pass: "Rithanya@2026", name: "Hospital Superadmin", username: "superadmin", id: "demo-superadmin" },
-  admin: { role: "ADMIN", pass: "Admin@2026", name: "Administration Desk", username: "admin", id: "demo-admin" },
-  "admin@rithanyahospital.com": { role: "ADMIN", pass: "Admin@2026", name: "Administration Desk", username: "admin", id: "demo-admin" },
-  staff: { role: "STAFF", pass: "Staff@2026", name: "Nursing Station Staff", username: "staff", id: "demo-staff" },
-  "staff@rithanyahospital.com": { role: "STAFF", pass: "Staff@2026", name: "Nursing Station Staff", username: "staff", id: "demo-staff" },
+  superadmin: { role: "SUPERADMIN", pass: "Hameed@2026", name: "Hospital Superadmin", username: "superadmin", id: "demo-superadmin" },
+  "mgrhameed@gmail.com": { role: "SUPERADMIN", pass: "Hameed@2026", name: "Hospital Superadmin", username: "superadmin", id: "demo-superadmin" },
+  admin: { role: "ADMIN", pass: "Rithanya@2026", name: "Administration Desk", username: "admin", id: "demo-admin" },
+  "admin@rithanyahospital.com": { role: "ADMIN", pass: "Rithanya@2026", name: "Administration Desk", username: "admin", id: "demo-admin" },
 };
 
 export const userSessionCache = new Map<string, SessionUser>();
@@ -109,11 +107,6 @@ export async function loadUser(userId: string): Promise<SessionUser | null> {
   }
   if (userId === "demo-admin") {
     const s: SessionUser = { id: userId, username: "admin", fullName: "Administration Desk", role: "ADMIN", modules: computeModules("ADMIN") };
-    userSessionCache.set(userId, s);
-    return s;
-  }
-  if (userId === "demo-staff") {
-    const s: SessionUser = { id: userId, username: "staff", fullName: "Nursing Station Staff", role: "STAFF", modules: computeModules("STAFF") };
     userSessionCache.set(userId, s);
     return s;
   }
