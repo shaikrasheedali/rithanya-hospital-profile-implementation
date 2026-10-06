@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { Droplet, RefreshCw } from "lucide-react";
 
 export type StockRow = {
-  id: string;
+  id?: string;
   bloodGroup: string;
-  groupCategory: string;
+  groupCategory?: string;
   wholeBloodUnits: number;
+  packedCellsUnits?: number;
   plasmaUnits: number;
-  lastUpdated: string | Date;
+  lastUpdated?: string | Date;
 };
 
 const THEME: Record<string, { bg: string; fg: string; sub: string; bar: string; ring: string }> = {
@@ -25,21 +26,47 @@ const fmt = (d: string | Date) => {
   return t.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });
 };
 
+const ORDER = ["O+", "A+", "B+", "AB+", "O-", "A-", "B-", "AB-"] as const;
+
 function normalizeStock(items: StockRow[]): StockRow[] {
-  if (!items || !items.length) return [];
-  const order = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
-  const shortOrder = ["O", "A", "B", "AB"];
-  const hasPlusMinus = items.some((i) => i.bloodGroup.includes("+") || i.bloodGroup.includes("-"));
-  if (hasPlusMinus) {
-    return [...items].sort((a, b) => {
-      const ia = order.indexOf(a.bloodGroup);
-      const ib = order.indexOf(b.bloodGroup);
-      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-    });
+  if (!items || !items.length) {
+    return ORDER.map((g) => ({
+      id: `stock-${g}`,
+      bloodGroup: g,
+      groupCategory: g.replace(/[+-]/g, ""),
+      wholeBloodUnits: 0,
+      packedCellsUnits: 0,
+      plasmaUnits: 0,
+      lastUpdated: new Date().toISOString(),
+    }));
   }
-  return [...items].sort((a, b) => {
-    const key = (x: StockRow) => x.bloodGroup || x.groupCategory;
-    return shortOrder.indexOf(key(a)) - shortOrder.indexOf(key(b));
+  const map = new Map<string, StockRow>();
+  for (const item of items) {
+    if (item && item.bloodGroup) {
+      map.set(item.bloodGroup, item);
+    }
+  }
+  return ORDER.map((g) => {
+    const existing = map.get(g);
+    if (existing) {
+      return {
+        ...existing,
+        bloodGroup: g,
+        groupCategory: existing.groupCategory || g.replace(/[+-]/g, ""),
+        wholeBloodUnits: existing.wholeBloodUnits ?? 0,
+        packedCellsUnits: existing.packedCellsUnits ?? 0,
+        plasmaUnits: existing.plasmaUnits ?? 0,
+      };
+    }
+    return {
+      id: `stock-${g}`,
+      bloodGroup: g,
+      groupCategory: g.replace(/[+-]/g, ""),
+      wholeBloodUnits: 0,
+      packedCellsUnits: 0,
+      plasmaUnits: 0,
+      lastUpdated: new Date().toISOString(),
+    };
   });
 }
 
@@ -76,12 +103,14 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
   }, []);
 
   const latest = stock.reduce<string | null>((a, s) => {
+    if (!s.lastUpdated) return a;
     const t = new Date(s.lastUpdated);
     if (Number.isNaN(t.getTime())) return a;
     const iso = t.toISOString();
     return (!a || t > new Date(a) ? iso : a);
   }, null);
-  const max = Math.max(20, ...stock.flatMap((s) => [s.wholeBloodUnits, s.plasmaUnits]));
+
+  const max = Math.max(20, ...stock.flatMap((s) => [s.wholeBloodUnits ?? 0, s.packedCellsUnits ?? 0, s.plasmaUnits ?? 0]));
 
   if (stock.length === 0) {
     return (
@@ -113,18 +142,19 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {stock.map((s) => {
           const cat = (s.groupCategory || s.bloodGroup).replace(/[+-]/g, "");
-          const t = THEME[cat] ?? THEME[s.groupCategory] ?? THEME.AB;
+          const t = THEME[cat] ?? THEME[s.groupCategory || ""] ?? THEME.AB;
           const displayGroup = s.bloodGroup || s.groupCategory;
           const rows = [
-            { label: "Whole blood", value: s.wholeBloodUnits },
-            { label: "Plasma", value: s.plasmaUnits },
+            { label: "WB: Whole Blood", value: s.wholeBloodUnits ?? 0 },
+            { label: "PC: Packed Cells (PRBC)", value: s.packedCellsUnits ?? 0 },
+            { label: "FFP: Fresh Frozen Plasma", value: s.plasmaUnits ?? 0 },
           ];
           return (
             <article
               key={s.id || s.bloodGroup}
               className="group relative overflow-hidden rounded-2xl p-6 shadow-xl transition-transform duration-300 hover:-translate-y-1.5"
               style={{ background: t.bg, color: t.fg }}
-              aria-label={`Blood group ${displayGroup}: ${s.wholeBloodUnits} whole blood units, ${s.plasmaUnits} plasma units`}
+              aria-label={`Blood group ${displayGroup}: ${s.wholeBloodUnits ?? 0} WB units, ${s.packedCellsUnits ?? 0} PC units, ${s.plasmaUnits ?? 0} FFP units`}
             >
               <Droplet className="absolute -right-6 -top-6 h-40 w-40 opacity-15" style={{ color: t.fg }} aria-hidden />
               <div className="relative flex items-end justify-between">
@@ -138,11 +168,11 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
                 {rows.map((r) => {
                   return (
                     <div key={r.label}>
-                      <div className="flex items-baseline justify-between">
-                        <span className="text-base font-semibold" style={{ color: t.sub }}>{r.label}</span>
-                        <span className="font-heading text-3xl font-bold" style={{ color: t.fg }}>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-sm font-semibold sm:text-base leading-tight" style={{ color: t.sub }}>{r.label}</span>
+                        <span className="font-heading text-2xl font-bold sm:text-3xl shrink-0" style={{ color: t.fg }}>
                           {r.value}
-                          <span className="ml-1 text-sm font-medium" style={{ color: t.sub }}>units</span>
+                          <span className="ml-1 text-xs font-medium sm:text-sm" style={{ color: t.sub }}>units</span>
                         </span>
                       </div>
                       <div className="mt-1.5 h-2 overflow-hidden rounded-full" style={{ background: t.ring }}>

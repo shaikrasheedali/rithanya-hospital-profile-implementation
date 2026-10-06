@@ -135,6 +135,7 @@ model BloodStock {
   groupCategory    String   @map("group_category")
   colorCode        String   @map("color_code")
   wholeBloodUnits  Int      @default(0) @map("whole_blood_units")
+  packedCellsUnits Int      @default(0) @map("packed_cells_units")
   plasmaUnits      Int      @default(0) @map("plasma_units")
   lastUpdated      DateTime @default(now()) @map("last_updated")
 

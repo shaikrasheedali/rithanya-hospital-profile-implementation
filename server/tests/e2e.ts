@@ -143,7 +143,7 @@ async function main() {
       const prods = await req("GET", "/api/public/products");
       ok(prods.status === 200 && ((prods.json as { items: unknown[] }).items.length >= 8), "products list", prods.status);
       const stock = await req("GET", "/api/public/blood-stock");
-      ok(stock.status === 200 && ((stock.json as { stock: unknown[] }).stock.length === 4), "blood-stock 4 groups", stock.status);
+      ok(stock.status === 200 && ((stock.json as { stock: unknown[] }).stock.length === 8), "blood-stock 8 groups", stock.status);
       const hm = await req("GET", "/api/public/home");
       ok(hm.status === 200 && !!(hm.json as { settings?: unknown })?.settings && Array.isArray((hm.json as { specialties?: unknown[] })?.specialties), "home aggregate", hm.status);
     }

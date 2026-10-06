@@ -52,7 +52,7 @@ type HomeData = {
   insurance: Array<{ id: string; name: string; schemeType: string; media: MediaRef[] }>;
   blogs: { posts: Array<{ id: string; title: string; slug: string; category: string; excerpt: string; publishedAt: string; media: MediaRef[] }> };
   testimonials: Array<{ id: string; patientName: string; location: string; treatment: string; rating: number; quote: string; media: MediaRef[] }>;
-  stock: Array<{ id: string; bloodGroup: string; groupCategory: string; wholeBloodUnits: number; plasmaUnits: number; lastUpdated: string }>;
+  stock: Array<{ id: string; bloodGroup: string; groupCategory: string; wholeBloodUnits: number; packedCellsUnits?: number; plasmaUnits: number; lastUpdated: string }>;
 };
 
 function Loading() {

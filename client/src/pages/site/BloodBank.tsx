@@ -12,6 +12,7 @@ type StockRow = {
   bloodGroup: string;
   groupCategory: string;
   wholeBloodUnits: number;
+  packedCellsUnits?: number;
   plasmaUnits: number;
   lastUpdated: string;
 };
@@ -74,7 +75,7 @@ export default function BloodBankPage() {
         <div className="mt-8">
           {loading ? (
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-              {[0, 1, 2, 3].map((i) => (
+              {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
                 <div key={i} className="h-64 animate-pulse rounded-2xl bg-line/60" />
               ))}
             </div>

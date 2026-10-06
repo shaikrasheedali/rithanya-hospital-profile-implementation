@@ -17,8 +17,8 @@ async function main() {
   console.log("[test] settings OK:", s.legalName);
 
   const stock = await getBloodStock();
-  assert.ok(stock.length === 4, `blood stock rows (got ${stock.length})`);
-  assert.deepStrictEqual(stock.map((r) => r.groupCategory), ["O", "A", "B", "AB"]);
+  assert.ok(stock.length === 8, `blood stock rows (got ${stock.length})`);
+  assert.deepStrictEqual(stock.map((r) => r.bloodGroup), ["O+", "A+", "B+", "AB+", "O-", "A-", "B-", "AB-"]);
   console.log("[test] blood stock OK");
 
   const blogs = await getBlogs({ pageSize: 3 });

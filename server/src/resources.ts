@@ -279,13 +279,14 @@ const bloodbank: Handler = {
         for (const s of stocks) {
           const g = oneOf(s.bloodGroup, ["O", "A", "B", "AB", "O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"] as const, "blood group");
           const wb = num(s.wholeBloodUnits, "Whole blood units", { min: 0, max: 9999 })!;
+          const pc = num(s.packedCellsUnits, "Packed cells (PRBC) units", { min: 0, max: 9999 }) ?? 0;
           const pl = num(s.plasmaUnits, "Plasma units", { min: 0, max: 9999 })!;
           const cat = g.replace(/[+-]/g, "");
           await withDbTimeout(
             prisma.bloodStock.upsert({
               where: { bloodGroup: g },
-              create: { bloodGroup: g, groupCategory: cat, colorCode: colors[cat] ?? "WHITE", wholeBloodUnits: wb, plasmaUnits: pl },
-              update: { wholeBloodUnits: wb, plasmaUnits: pl, lastUpdated: new Date() },
+              create: { bloodGroup: g, groupCategory: cat, colorCode: colors[cat] ?? "WHITE", wholeBloodUnits: wb, packedCellsUnits: pc, plasmaUnits: pl },
+              update: { wholeBloodUnits: wb, packedCellsUnits: pc, plasmaUnits: pl, lastUpdated: new Date() },
             }),
             1500,
           );
@@ -300,7 +301,7 @@ const bloodbank: Handler = {
       "UPDATE_BLOOD_STOCK",
       "BloodStock",
       null,
-      stocks.map((s: any) => `${s.bloodGroup}: WB=${s.wholeBloodUnits}, Plasma=${s.plasmaUnits}`).join(" | "),
+      stocks.map((s: any) => `${s.bloodGroup}: WB=${s.wholeBloodUnits}, PC=${s.packedCellsUnits ?? 0}, FFP=${s.plasmaUnits}`).join(" | "),
     );
     return { ok: true };
   },

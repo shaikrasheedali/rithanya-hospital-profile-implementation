@@ -96,7 +96,7 @@ export async function getProducts() {
 // In-memory mutable blood stock for near-instant access
 let inMemoryBloodStock = [...FALLBACK_BLOOD_STOCK];
 
-export function updateInMemoryBloodStock(stocks: Array<{ bloodGroup: string; wholeBloodUnits: number; plasmaUnits: number }>) {
+export function updateInMemoryBloodStock(stocks: Array<{ bloodGroup: string; wholeBloodUnits: number; packedCellsUnits?: number; plasmaUnits: number }>) {
   const colors: Record<string, string> = { O: "SKY_BLUE", A: "YELLOW", B: "RED", AB: "WHITE" };
   for (const s of stocks) {
     const idx = inMemoryBloodStock.findIndex((x) => x.bloodGroup === s.bloodGroup);
@@ -107,6 +107,7 @@ export function updateInMemoryBloodStock(stocks: Array<{ bloodGroup: string; who
       groupCategory: cat,
       colorCode: colors[cat] ?? "WHITE",
       wholeBloodUnits: s.wholeBloodUnits,
+      packedCellsUnits: s.packedCellsUnits ?? (idx >= 0 ? (inMemoryBloodStock[idx] as any).packedCellsUnits : 0) ?? 0,
       plasmaUnits: s.plasmaUnits,
       lastUpdated: new Date(),
     };
@@ -120,12 +121,12 @@ export async function getBloodStock() {
     try {
       const rows = await withDbTimeout(prisma.bloodStock.findMany(), 1500);
       if (rows && rows.length) {
-        const order = ["O", "A", "B", "AB"];
-        const sorted = (rows as Array<{ groupCategory?: string | null }>).sort((a: any, b: any) => {
-          const aCat = typeof a?.groupCategory === "string" ? a.groupCategory : "";
-          const bCat = typeof b?.groupCategory === "string" ? b.groupCategory : "";
-          const aIdx = order.indexOf(aCat);
-          const bIdx = order.indexOf(bCat);
+        const order = ["O+", "A+", "B+", "AB+", "O-", "A-", "B-", "AB-"];
+        const sorted = (rows as Array<{ bloodGroup?: string | null; groupCategory?: string | null }>).sort((a: any, b: any) => {
+          const aGrp = typeof a?.bloodGroup === "string" ? a.bloodGroup : "";
+          const bGrp = typeof b?.bloodGroup === "string" ? b.bloodGroup : "";
+          const aIdx = order.indexOf(aGrp);
+          const bIdx = order.indexOf(bGrp);
           return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
         });
         inMemoryBloodStock = sorted as any;

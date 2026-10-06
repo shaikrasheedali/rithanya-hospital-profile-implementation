@@ -1149,8 +1149,13 @@ export const FALLBACK_FACILITIES = [
 ];
 
 export const FALLBACK_BLOOD_STOCK = [
-  { id: "stock-O", bloodGroup: "O+", groupCategory: "O", colorCode: "SKY_BLUE", wholeBloodUnits: 22, plasmaUnits: 14 },
-  { id: "stock-A", bloodGroup: "A+", groupCategory: "A", colorCode: "YELLOW", wholeBloodUnits: 17, plasmaUnits: 11 },
-  { id: "stock-B", bloodGroup: "B+", groupCategory: "B", colorCode: "RED", wholeBloodUnits: 14, plasmaUnits: 9 },
-  { id: "stock-AB", bloodGroup: "AB+", groupCategory: "AB", colorCode: "WHITE", wholeBloodUnits: 6, plasmaUnits: 5 },
+  { id: "stock-O-pos", bloodGroup: "O+", groupCategory: "O", colorCode: "SKY_BLUE", wholeBloodUnits: 22, packedCellsUnits: 18, plasmaUnits: 14 },
+  { id: "stock-A-pos", bloodGroup: "A+", groupCategory: "A", colorCode: "YELLOW", wholeBloodUnits: 17, packedCellsUnits: 13, plasmaUnits: 11 },
+  { id: "stock-B-pos", bloodGroup: "B+", groupCategory: "B", colorCode: "RED", wholeBloodUnits: 14, packedCellsUnits: 12, plasmaUnits: 9 },
+  { id: "stock-AB-pos", bloodGroup: "AB+", groupCategory: "AB", colorCode: "WHITE", wholeBloodUnits: 6, packedCellsUnits: 5, plasmaUnits: 5 },
+  { id: "stock-O-neg", bloodGroup: "O-", groupCategory: "O", colorCode: "SKY_BLUE", wholeBloodUnits: 10, packedCellsUnits: 8, plasmaUnits: 6 },
+  { id: "stock-A-neg", bloodGroup: "A-", groupCategory: "A", colorCode: "YELLOW", wholeBloodUnits: 8, packedCellsUnits: 6, plasmaUnits: 4 },
+  { id: "stock-B-neg", bloodGroup: "B-", groupCategory: "B", colorCode: "RED", wholeBloodUnits: 7, packedCellsUnits: 5, plasmaUnits: 4 },
+  { id: "stock-AB-neg", bloodGroup: "AB-", groupCategory: "AB", colorCode: "WHITE", wholeBloodUnits: 4, packedCellsUnits: 3, plasmaUnits: 2 },
 ];
+

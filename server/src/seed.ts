@@ -155,27 +155,27 @@ export async function ensureBaseData() {
       2500
     );
     const colors: Record<string, string> = { O: "SKY_BLUE", A: "YELLOW", B: "RED", AB: "WHITE" };
-    const seedStock: Record<string, [number, number, string]> = {
-      "O+": [14, 9, "O"],
-      "O-": [8, 5, "O"],
-      "A+": [11, 7, "A"],
-      "A-": [6, 4, "A"],
-      "B+": [9, 6, "B"],
-      "B-": [5, 3, "B"],
-      "AB+": [4, 3, "AB"],
-      "AB-": [2, 2, "AB"],
-      "O": [14, 9, "O"],
-      "A": [11, 7, "A"],
-      "B": [9, 6, "B"],
-      "AB": [4, 3, "AB"],
+    const seedStock: Record<string, [number, number, number, string]> = {
+      "O+": [14, 12, 9, "O"],
+      "A+": [11, 9, 7, "A"],
+      "B+": [9, 8, 6, "B"],
+      "AB+": [4, 4, 3, "AB"],
+      "O-": [8, 6, 5, "O"],
+      "A-": [6, 5, 4, "A"],
+      "B-": [5, 4, 3, "B"],
+      "AB-": [2, 2, 2, "AB"],
+      "O": [14, 12, 9, "O"],
+      "A": [11, 9, 7, "A"],
+      "B": [9, 8, 6, "B"],
+      "AB": [4, 4, 3, "AB"],
     };
-    for (const [g, [wb, pl, cat]] of Object.entries(seedStock)) {
+    for (const [g, [wb, pc, pl, cat]] of Object.entries(seedStock)) {
       try {
         await withDbTimeout(
           prisma.bloodStock.upsert({
             where: { bloodGroup: g },
-            create: { bloodGroup: g, groupCategory: cat, colorCode: colors[cat], wholeBloodUnits: wb, plasmaUnits: pl },
-            update: {},
+            create: { bloodGroup: g, groupCategory: cat, colorCode: colors[cat], wholeBloodUnits: wb, packedCellsUnits: pc, plasmaUnits: pl },
+            update: { packedCellsUnits: pc },
           }),
           1500
         );
