@@ -13,6 +13,13 @@ const seedCandidates = [
   path.resolve(__dirname, "../../public/seed"),
   path.resolve(__dirname, "../../../public/seed"),
   path.resolve(__dirname, "../../../server/public/seed"),
+  // Source-tree / built-client fallbacks. The shipped assets live in
+  // client/public/seed (git-tracked) and are copied into client/dist and
+  // server/public by `npm run build`, so at least one of these always exists.
+  path.join(process.cwd(), "client", "public", "seed"),
+  path.join(process.cwd(), "client", "dist", "seed"),
+  path.resolve(__dirname, "../../../client/public/seed"),
+  path.resolve(__dirname, "../../../client/dist/seed"),
 ];
 
 let seedStaticDir: string | null = null;

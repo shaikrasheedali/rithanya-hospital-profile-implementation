@@ -12,6 +12,7 @@ import {
 import { hashPassword, computeModules } from "./auth.js";
 import { ensureTables } from "./schemaBootstrap.js";
 import { setEntityMedia, registerAssetInMemory, type EntityType } from "./media.js";
+import { getSeedDir } from "./routes/media.js";
 import { DEFAULT_SETTINGS } from "./settings.js";
 import { SEED_EMPLOYEES } from "./employees.js";
 import { SEED_CATEGORIES, SEED_LEDGER } from "./finance.js";
@@ -123,7 +124,12 @@ const SEED_EXTENSIONS = new Set([".webp", ".jpg", ".jpeg", ".png", ".mp4", ".web
 
 async function seedMedia(): Promise<Record<string, string>> {
   const ids: Record<string, string> = {};
-  const localSeed = path.join(process.cwd(), "public", "seed");
+  // Resolve the seed folder with the SAME resolution used by the /seed static
+  // mount. The production entrypoint (root index.js on GoDaddy) runs with
+  // cwd = repo root, where `public/seed` does not exist — a cwd-only path
+  // silently produced an empty media library and left every collection item
+  // without media links.
+  const localSeed = getSeedDir() ?? path.join(process.cwd(), "public", "seed");
 
   const entries = new Map<string, "IMAGE" | "VIDEO">();
   try {
@@ -134,7 +140,7 @@ async function seedMedia(): Promise<Record<string, string>> {
       entries.set(f, ext === ".mp4" || ext === ".webm" || ext === ".mov" || ext === ".ogv" ? "VIDEO" : "IMAGE");
     }
   } catch {
-    console.warn("[seed] Seed asset folder not found; skipping media asset seeding.");
+    console.warn(`[seed] Seed asset folder not found (${localSeed}); skipping media asset seeding.`);
   }
   // Guarantee the referenced fallback names exist even if the dir scan failed.
   for (const [file, kind] of FALLBACK_FILE_NAMES) {
@@ -281,6 +287,32 @@ async function seedCollection(entityKey: string, def: CollectionSeedDef, mediaMa
         const item = def.rows.find((r) => String(r[def.matchKey]).trim().toLowerCase() === String(keeper[def.matchKey]).trim().toLowerCase());
         const ids = item ? mediaIdsFor(item[def.mediaField ?? "media"] ?? [], mediaMap) : [];
         if (ids.length) await setEntityMedia(entityKey as EntityType, String(keeper.id), ids);
+      }
+    }
+    // Heal databases first seeded before the media library could be resolved
+    // (e.g. the first production boot ran with cwd = repo root and the seed
+    // folder was not found): when the collection has NO media links at all,
+    // re-link each canonical seed row to its bundled media. As soon as a
+    // single link exists for the collection this is skipped entirely, so
+    // admin edits — including intentionally removed images — are preserved.
+    if (Object.keys(mediaMap).length > 0) {
+      const linkRows = (await withDbTimeout(
+        prisma.mediaLink.findMany({ where: { entityType: entityKey }, select: { entityId: true } }),
+        DB_WRITE_MS,
+      )) as Array<{ entityId: string }>;
+      if (linkRows.length === 0) {
+        const present = new Set(rows.map((r) => String(r.id)));
+        let healed = 0;
+        for (const item of def.rows) {
+          const id = String(item.id);
+          if (!present.has(id)) continue;
+          const ids = mediaIdsFor(item[def.mediaField ?? "media"] ?? [], mediaMap);
+          if (!ids.length) continue;
+          await setEntityMedia(entityKey as EntityType, id, ids);
+          healed++;
+        }
+        if (healed > 0)
+          console.log(`[seed] ${entityKey}: linked ${healed} item(s) to their bundled media (library was empty).`);
       }
     }
     if (removed > 0) console.log(`[seed] ${entityKey}: removed ${removed} duplicate row(s) born from the legacy dual-id seed.`);
