@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, CheckCircle2, Minus, Plus, ShieldCheck, ShoppingBag, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { formatINR } from "@/lib/utils";
@@ -29,16 +29,34 @@ export const useCart = () => {
 
 export const DELIVERY_FREE_ABOVE = 500;
 export const DELIVERY_FEE = 40;
+/** Server-side hard cap: POST /api/public/orders rejects quantities above 20. */
+export const MAX_ORDER_QTY = 20;
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [isOpen, setOpen] = useState(false);
   const [ready, setReady] = useState(false);
+  // Mirror of `items` so handlers compute the next state (and the exact toast
+  // message) synchronously — a setState updater only runs on the next render,
+  // so reading a flag set inside it reported "capped" too late.
+  const itemsRef = useRef<CartItem[]>([]);
+
+  const applyItems = useCallback((updater: (cur: CartItem[]) => CartItem[]) => {
+    const next = updater(itemsRef.current);
+    itemsRef.current = next;
+    setItems(next);
+  }, []);
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem("rh_cart");
-      if (raw) setItems(JSON.parse(raw));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          itemsRef.current = parsed;
+          setItems(parsed);
+        }
+      }
     } catch {}
     setReady(true);
   }, []);
@@ -51,31 +69,31 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       toast.error(`${p.name} is currently out of stock.`);
       return;
     }
-    let capped = false;
-    setItems((cur) => {
-      const hit = cur.find((i) => i.id === p.id);
-      if (hit) {
-        const next = Math.min(p.stock, hit.quantity + qty);
-        if (next === hit.quantity || next < hit.quantity + qty) capped = true;
-        return cur.map((i) => (i.id === p.id ? { ...i, stock: p.stock, quantity: next } : i));
-      }
-      const nextQty = Math.min(p.stock, qty);
-      if (nextQty < qty) capped = true;
-      return [...cur, { ...p, quantity: nextQty }];
-    });
-    if (capped) toast.error(`Only ${p.stock} unit(s) of ${p.name} available.`);
+    const maxAllowed = Math.min(p.stock, MAX_ORDER_QTY);
+    const hit = itemsRef.current.find((i) => i.id === p.id);
+    const requested = (hit?.quantity ?? 0) + qty;
+    const nextQty = Math.min(maxAllowed, requested);
+    const capped = nextQty < requested;
+    applyItems((cur) =>
+      hit
+        ? cur.map((i) => (i.id === p.id ? { ...i, stock: p.stock, quantity: nextQty } : i))
+        : [...cur, { ...p, quantity: nextQty }],
+    );
+    if (capped) toast.error(`Only ${maxAllowed} unit(s) of ${p.name} available.`);
     else toast.success(`${p.name} added to cart.`);
     setOpen(true);
-  }, []);
+  }, [applyItems]);
   const update = useCallback(
     (id: string, delta: number) =>
-      setItems((cur) =>
-        cur.map((i) => (i.id === id ? { ...i, quantity: Math.max(1, Math.min(i.stock, i.quantity + delta)) } : i)),
+      applyItems((cur) =>
+        cur.map((i) =>
+          i.id === id ? { ...i, quantity: Math.max(1, Math.min(i.stock, MAX_ORDER_QTY, i.quantity + delta)) } : i,
+        ),
       ),
-    [],
+    [applyItems],
   );
-  const remove = useCallback((id: string) => setItems((cur) => cur.filter((i) => i.id !== id)), []);
-  const clear = useCallback(() => setItems([]), []);
+  const remove = useCallback((id: string) => applyItems((cur) => cur.filter((i) => i.id !== id)), [applyItems]);
+  const clear = useCallback(() => applyItems(() => []), [applyItems]);
 
   const value = useMemo<CartCtx>(
     () => ({
@@ -119,6 +137,15 @@ function CartDrawer() {
       document.body.style.overflow = "";
     };
   }, [isOpen, close]);
+
+  // Closing the drawer resets the checkout flow (step/confirmation/error) so
+  // reopening never shows a stale "Order received" screen.
+  useEffect(() => {
+    if (isOpen) return;
+    setStep("CART");
+    setDone(null);
+    setError("");
+  }, [isOpen]);
 
   if (!isOpen) return null;
   const delivery = subtotal === 0 ? 0 : subtotal >= DELIVERY_FREE_ABOVE ? 0 : DELIVERY_FEE;
@@ -206,7 +233,7 @@ function CartDrawer() {
                         <div className="flex items-center gap-1 rounded-lg border border-line bg-white">
                           <button aria-label="Decrease quantity" onClick={() => update(i.id, -1)} className="p-2 hover:text-royal"><Minus className="h-4 w-4" /></button>
                           <span className="w-6 text-center font-semibold">{i.quantity}</span>
-                          <button aria-label="Increase quantity" onClick={() => update(i.id, 1)} disabled={i.quantity >= i.stock} className="p-2 hover:text-royal disabled:opacity-40"><Plus className="h-4 w-4" /></button>
+                          <button aria-label="Increase quantity" onClick={() => update(i.id, 1)} disabled={i.quantity >= Math.min(i.stock, MAX_ORDER_QTY)} className="p-2 hover:text-royal disabled:opacity-40"><Plus className="h-4 w-4" /></button>
                         </div>
                         <button onClick={() => remove(i.id)} aria-label={`Remove ${i.name}`} className="rounded-lg p-2 text-alert hover:bg-alert/10"><Trash2 className="h-4 w-4" /></button>
                       </div>
@@ -219,10 +246,10 @@ function CartDrawer() {
           {step === "CHECKOUT" && (
             <form id="checkout-form" onSubmit={submit} className="space-y-4">
               <p className="rounded-lg bg-canvas p-3 text-sm text-ink/80">Secure checkout — we’ll confirm your order by phone and dispatch from our 24/7 pharmacy.</p>
-              <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Full name *</span><input required minLength={2} className={input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoComplete="name" /></label>
-              <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Mobile number *</span><input required type="tel" inputMode="tel" className={input} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} autoComplete="tel" /></label>
-              <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Delivery address & landmark *</span><textarea required rows={3} className={input} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} autoComplete="street-address" /></label>
-              <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">PIN code *</span><input required pattern="\d{6}" maxLength={6} inputMode="numeric" className={input} value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value })} autoComplete="postal-code" /></label>
+              <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Full name *</span><input required minLength={2} name="name" id="checkout-name" className={input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoComplete="name" /></label>
+              <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Mobile number *</span><input required type="tel" inputMode="tel" name="phone" id="checkout-phone" className={input} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} autoComplete="tel" /></label>
+              <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Delivery address & landmark *</span><textarea required rows={3} name="address" id="checkout-address" className={input} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} autoComplete="street-address" /></label>
+              <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">PIN code *</span><input required pattern="\d{6}" maxLength={6} inputMode="numeric" name="pin" id="checkout-pin" className={input} value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value })} autoComplete="postal-code" /></label>
               <fieldset>
                 <legend className="mb-2 text-sm font-semibold text-navy">Payment method</legend>
                 <div className="grid grid-cols-2 gap-3">

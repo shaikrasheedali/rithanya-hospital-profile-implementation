@@ -19,7 +19,27 @@ export default function InsightsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState(q);
   const pageSize = 6;
+
+  // Keep the input in sync when the query changes externally (back button, etc.).
+  useEffect(() => { setSearch(q); }, [q]);
+
+  // Debounced search: typing updates the URL (and refetches) only after a
+  // pause, and with `replace` so a keystroke never pushes a history entry.
+  useEffect(() => {
+    if (search === q) return;
+    const t = setTimeout(() => {
+      setSp((prev) => {
+        const n = new URLSearchParams(prev);
+        if (search) n.set("q", search);
+        else n.delete("q");
+        n.delete("page");
+        return n;
+      }, { replace: true });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [search, q, setSp]);
 
   useEffect(() => {
     document.title = "Health Insights | Rithanya Hospital";
@@ -55,7 +75,7 @@ export default function InsightsPage() {
       <PageHero eyebrow="Health insights" title="Learn from our clinicians" desc="Practical guides on diabetes, thalassemia, maternal health and seasonal illness." />
       <section className="mx-auto max-w-7xl px-6 py-16 sm:px-8">
         <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-center">
-          <input value={q} onChange={(e) => set("q", e.target.value)} placeholder="Search articles…" className="w-full rounded-full border border-line bg-white px-5 py-3 lg:max-w-md" aria-label="Search articles" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} name="insights-search" placeholder="Search articles…" className="w-full rounded-full border border-line bg-white px-5 py-3 lg:max-w-md" aria-label="Search articles" />
           <div className="flex flex-wrap gap-2">
             {CATS.map((c) => (
               <button key={c} onClick={() => set("category", c)} className={`rounded-full border px-4 py-1.5 font-medium ${category === c ? "border-royal bg-royal text-white" : "border-line bg-white hover:border-royal hover:text-royal"}`}>{c}</button>

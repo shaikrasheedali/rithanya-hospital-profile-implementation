@@ -6,6 +6,7 @@ import { SIG_H, SIG_W, SignaturePad } from "@/components/portal/SignaturePad";
 import { Badge, Btn, Card, Empty, EntityPicker, Field, Modal, PageHeader, api, inputCls, useToast } from "@/components/portal/ui";
 import { computeMonthlyPayroll, daysInMonth } from "@/lib/payroll";
 import { formatDate, formatINR } from "@/lib/utils";
+import { softRefresh } from "@/lib/softRefresh";
 import { downloadPayslipPdf } from "./PayslipPdf";
 
 type Emp = {
@@ -156,7 +157,7 @@ export function PayrollDesk({
 
     toast(paths.length ? "Payroll updated & digitally signed" : "Payroll updated successfully");
     setSel(null);
-    setTimeout(() => window.location.reload(), 800);
+    setTimeout(() => softRefresh(), 800);
   }
 
   async function handleDownloadPayslip(e: Emp) {
@@ -429,6 +430,7 @@ export function PayrollDesk({
                   type="number"
                   min={0}
                   step="1"
+                  name="base-pay"
                   className={inputCls}
                   value={base}
                   onChange={(e) => setBase(e.target.value)}
@@ -443,6 +445,7 @@ export function PayrollDesk({
                   type="number"
                   min={0}
                   max={days}
+                  name="lop-days"
                   className={inputCls}
                   value={lop}
                   onChange={(e) => setLop(e.target.value)}
@@ -454,6 +457,7 @@ export function PayrollDesk({
                   type="number"
                   min={0}
                   step="0.01"
+                  name="allowances"
                   className={inputCls}
                   value={allow}
                   onChange={(e) => setAllow(e.target.value)}
@@ -465,6 +469,7 @@ export function PayrollDesk({
                   type="number"
                   min={0}
                   step="0.01"
+                  name="deductions"
                   className={inputCls}
                   value={ded}
                   onChange={(e) => setDed(e.target.value)}

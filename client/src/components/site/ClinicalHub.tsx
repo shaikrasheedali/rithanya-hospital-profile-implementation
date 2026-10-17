@@ -51,6 +51,8 @@ export function ClinicalHub({ data }: { data: Record<(typeof TABS)[number]["key"
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
+            name="clinical-search"
+            aria-label={`Search ${tab}`}
             placeholder={`Search ${tab}…`}
             className="w-full rounded-full border border-line bg-white py-3 pl-12 pr-4 focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/20"
           />

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lock, Save } from "lucide-react";
 import { Badge, Btn, Card, PageHeader, api, useToast } from "@/components/portal/ui";
+import { softRefresh } from "@/lib/softRefresh";
 
 const COLS: Array<[string, string]> = [["emr", "Clinical / EMR"], ["bloodbank", "Blood bank"], ["cms", "CMS"], ["store", "Store"], ["hr", "HR"], ["finance", "Finance"], ["dpdp", "DPDP"]];
 type U = { id: string; fullName: string; username: string; role: string; isActive: boolean; modules: Record<string, boolean>; editable: boolean };
@@ -24,7 +25,7 @@ export function PermissionsMatrix({ users }: { users: U[] }) {
     setBusy(null);
     if (!r.ok) return toast(r.error || "Save failed — please try again.", "err");
     toast(`Permissions saved for ${u.fullName}`);
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => softRefresh(), 1200);
   }
 
   return (
@@ -42,7 +43,7 @@ export function PermissionsMatrix({ users }: { users: U[] }) {
                 {COLS.map(([k, l]) => (
                   <td key={k} className="px-3 py-3 text-center">
                     {u.role === "SUPERADMIN" ? <Lock className="mx-auto h-4 w-4 text-ink/40" aria-label="Always enabled" /> : (
-                      <input type="checkbox" aria-label={`${l} for ${u.fullName}`} disabled={!u.editable} checked={Boolean(state[u.id]?.[k])} onChange={(e) => setState({ ...state, [u.id]: { ...state[u.id], [k]: e.target.checked } })} className="h-5 w-5 accent-[#0D47A1] disabled:opacity-40" />
+                      <input type="checkbox" aria-label={`${l} for ${u.fullName}`} name={`perm-${u.id}-${k}`} disabled={!u.editable} checked={Boolean(state[u.id]?.[k])} onChange={(e) => setState({ ...state, [u.id]: { ...state[u.id], [k]: e.target.checked } })} className="h-5 w-5 accent-[#0D47A1] disabled:opacity-40" />
                     )}
                   </td>
                 ))}

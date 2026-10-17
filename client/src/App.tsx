@@ -1,5 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
-import { lazy, Suspense } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
+import { lazy, Suspense, useEffect } from "react";
 import SiteLayout from "@/pages/site/SiteLayout";
 import HomePage from "@/pages/site/Home";
 import AboutPage from "@/pages/site/About";
@@ -74,9 +74,21 @@ function LegacyClinicalRedirect({ kind }: { kind: string }) {
   return <Navigate to={`/clinical-care/${kind}/${slug ?? ""}`} replace />;
 }
 
+/** Navigations start at the top of the page (long detail pages otherwise land
+ * the visitor mid-scroll). `behavior: "instant"` overrides the global
+ * `scroll-behavior: smooth`, which would otherwise animate a long page back up. */
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [pathname]);
+  return null;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
+      <ScrollToTop />
       <Suspense fallback={<PortalFallback />}>
         <Routes>
         {/* Public site */}

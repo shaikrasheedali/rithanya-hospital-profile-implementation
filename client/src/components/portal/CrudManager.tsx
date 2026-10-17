@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Pencil, Plus, Power, Search, Trash2 } from "lucide-react";
 import { Badge, Btn, Card, Empty, Field, Modal, PageHeader, api, inputCls, useToast } from "@/components/portal/ui";
 import { formatDate, formatINR } from "@/lib/utils";
+import { softRefresh } from "@/lib/softRefresh";
 
 type Row = Record<string, unknown> & { id: string };
 export type CrudCol = {
@@ -77,6 +78,7 @@ export function CrudManager({
   const [v, setV] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
   const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const shown = useMemo(() => rows.filter((r) => !q || JSON.stringify(Object.values(r)).toLowerCase().includes(q.toLowerCase())), [rows, q]);
 
@@ -96,7 +98,7 @@ export function CrudManager({
     if (!r.ok) return toast(r.error || "Save failed — please try again.", "err");
     toast(`${singular} saved`);
     setEditing(null);
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => softRefresh(), 1200);
   }
   async function del(row: Row) {
     if (!confirm(`Delete this ${singular.toLowerCase()}? This cannot be undone.`)) return;
@@ -105,7 +107,7 @@ export function CrudManager({
     setRowBusy(null);
     if (!r.ok) return toast(r.error || "Delete failed — please try again.", "err");
     toast(`${singular} deleted`);
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => softRefresh(), 1200);
   }
   async function act(row: Row, action: string) {
     if (rowBusy) return;
@@ -114,7 +116,7 @@ export function CrudManager({
     setRowBusy(null);
     if (!r.ok) return toast(r.error || "Action failed — please try again.", "err");
     toast("Updated");
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => softRefresh(), 1200);
   }
 
   function cell(c: CrudCol, r: Row) {
@@ -150,7 +152,7 @@ export function CrudManager({
         <div className="border-b border-line p-4">
           <div className="relative max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink/50" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={searchPlaceholder} aria-label="Search" className={`${inputCls} pl-9`} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} name="crud-search" placeholder={searchPlaceholder} aria-label="Search" className={`${inputCls} pl-9`} />
           </div>
         </div>
         {shown.length === 0 ? <Empty text={rows.length ? "No matches." : `No ${singular.toLowerCase()} records yet.`} /> : (
@@ -181,15 +183,15 @@ export function CrudManager({
       </Card>
 
       {editing && (
-        <Modal title={editing === "new" ? `New ${singular.toLowerCase()}` : `Edit ${singular.toLowerCase()}`} onClose={() => setEditing(null)} footer={<><Btn variant="secondary" onClick={() => setEditing(null)}>Cancel</Btn><Btn onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Btn></>}>
-          <form onSubmit={(e) => { e.preventDefault(); save(); }} className="grid gap-4 sm:grid-cols-2">
+        <Modal title={editing === "new" ? `New ${singular.toLowerCase()}` : `Edit ${singular.toLowerCase()}`} onClose={() => setEditing(null)} footer={<><Btn variant="secondary" onClick={() => setEditing(null)}>Cancel</Btn><Btn onClick={() => { if (!formRef.current || formRef.current.reportValidity()) save(); }} disabled={busy}>{busy ? "Saving…" : "Save"}</Btn></>}>
+          <form ref={formRef} onSubmit={(e) => { e.preventDefault(); save(); }} className="grid gap-4 sm:grid-cols-2">
             {fields.map((f) => {
               if (f.createOnly && editing !== "new") return null;
               const span = f.half ? "" : "sm:col-span-2";
               if (f.type === "checkbox")
                 return (
                   <label key={f.name} className={`flex cursor-pointer items-center gap-3 self-end rounded-lg border border-line px-4 py-3 ${span}`}>
-                    <input type="checkbox" className="h-5 w-5 accent-[#0D47A1]" checked={Boolean(v[f.name])} onChange={(e) => setV({ ...v, [f.name]: e.target.checked })} />
+                    <input type="checkbox" name={f.name} id={`crud-${resource}-${f.name}`} className="h-5 w-5 accent-[#0D47A1]" checked={Boolean(v[f.name])} onChange={(e) => setV({ ...v, [f.name]: e.target.checked })} />
                     <span className="text-base font-medium">{f.label}</span>
                   </label>
                 );
@@ -197,15 +199,17 @@ export function CrudManager({
               return (
                 <Field key={f.name} label={label} help={f.type === "password" && editing !== "new" ? "Leave blank to keep the current password. Entering a value forces a reset." : f.help} className={span}>
                   {f.type === "textarea" ? (
-                    <textarea rows={3} className={inputCls} value={String(v[f.name] ?? "")} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />
+                    <textarea rows={3} name={f.name} id={`crud-${resource}-${f.name}`} className={inputCls} value={String(v[f.name] ?? "")} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />
                   ) : f.type === "select" ? (
-                    <select className={inputCls} value={String(v[f.name] ?? "")} onChange={(e) => setV({ ...v, [f.name]: e.target.value })}>
+                    <select name={f.name} id={`crud-${resource}-${f.name}`} className={inputCls} value={String(v[f.name] ?? "")} onChange={(e) => setV({ ...v, [f.name]: e.target.value })}>
                       {f.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   ) : (
                     <input
                       type={f.type}
                       step={f.step}
+                      name={f.name}
+                      id={`crud-${resource}-${f.name}`}
                       className={inputCls}
                       required={f.required && !(f.type === "password" && editing !== "new")}
                       autoComplete={f.type === "password" ? "new-password" : undefined}

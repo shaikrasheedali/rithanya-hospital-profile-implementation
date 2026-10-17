@@ -121,8 +121,8 @@ export function DpdpStatus() {
   return (
     <form onSubmit={check} className="space-y-4 rounded-xl border border-line bg-white p-7">
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Tracking code</span><input value={code} onChange={(e) => setCode(e.target.value)} required placeholder="DPDP-XXXXXXXX" className={input} /></label>
-        <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Registered mobile</span><input value={phone} onChange={(e) => setPhone(e.target.value)} required type="tel" className={input} /></label>
+        <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Tracking code</span><input value={code} onChange={(e) => setCode(e.target.value)} required name="trackingCode" id="dpdp-trackingCode" placeholder="DPDP-XXXXXXXX" autoComplete="off" className={input} /></label>
+        <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Registered mobile</span><input value={phone} onChange={(e) => setPhone(e.target.value)} required type="tel" name="phone" id="dpdp-phone" autoComplete="tel" className={input} /></label>
       </div>
       <button disabled={busy} className="flex items-center gap-2 rounded-full bg-navy px-6 py-3 font-semibold text-white hover:bg-royal disabled:opacity-60"><Search className="h-5 w-5" /> {busy ? "Checking…" : "Verify status"}</button>
       {error && <p role="alert" className="rounded-lg bg-alert/10 p-3 font-medium text-alert">{error}</p>}

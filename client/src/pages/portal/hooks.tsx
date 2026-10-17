@@ -1,17 +1,22 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { entityHeader } from "@/lib/api";
+import { registerSoftRefresh } from "@/lib/softRefresh";
 
 export function usePortalData<T>(url: string): { data: T | null; loading: boolean; error: string | null; reload: () => void } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const dataRef = useRef<T | null>(null);
 
   const reload = useCallback(() => {
     setError(null);
     setNonce((n) => n + 1);
   }, []);
+
+  // Expose this loader to portal-wide soft refreshes while mounted.
+  useEffect(() => registerSoftRefresh(reload), [reload]);
 
   useEffect(() => {
     if (!url) {
@@ -20,7 +25,9 @@ export function usePortalData<T>(url: string): { data: T | null; loading: boolea
     }
     const ctrl = new AbortController();
     let alive = true;
-    setLoading(true);
+    // Only show the skeleton on the FIRST load — a soft refresh keeps the
+    // current data visible while the request is in flight.
+    if (!dataRef.current) setLoading(true);
     setError(null);
     fetch(url, { headers: entityHeader(), credentials: "same-origin", signal: ctrl.signal })
       .then(async (r) => {
@@ -36,6 +43,7 @@ export function usePortalData<T>(url: string): { data: T | null; loading: boolea
       })
       .then((d) => {
         if (alive && d) {
+          dataRef.current = d as T;
           setData(d);
           setError(null);
         }

@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { Eraser, FileCheck2, Paperclip, ScanSearch, XCircle } from "lucide-react";
 import { Badge, Btn, Card, Empty, Field, Modal, PageHeader, api, inputCls, useToast } from "@/components/portal/ui";
 import { formatDate } from "@/lib/utils";
+import { softRefresh } from "@/lib/softRefresh";
 
 export type DpdpDTO = {
   id: string; trackingCode: string; fullName: string; phoneNumber: string; identificationRef: string | null; recordsNature: string;
@@ -47,7 +48,7 @@ export function DpdpDesk({ rows }: { rows: DpdpDTO[] }) {
     toast(action === "erase" ? `${r.data?.erased ?? 0} record(s) erased` : "Request updated");
     setSel(null);
     setMatches(null);
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => softRefresh(), 1200);
   }
 
   return (
@@ -103,7 +104,7 @@ export function DpdpDesk({ rows }: { rows: DpdpDTO[] }) {
                   </div>
                 )}
               </div>
-              <Field label="Resolution notes (shown to the requester)"><textarea rows={2} className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+              <Field label="Resolution notes (shown to the requester)"><textarea rows={2} name="dpdp-notes" id="dpdp-notes" className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
             </div>
           )}
         </Modal>

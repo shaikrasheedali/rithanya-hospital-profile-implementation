@@ -208,14 +208,22 @@ export default function FinanceLedgerPage() {
   async function handlePrintLedger() {
     setPrinting(true);
     try {
+      // Totals must match the printed rows — the previous version mixed
+      // search-filtered rows with whole-month totals.
+      const printedCredit = shownEntries
+        .filter((e) => e.type === "CREDIT")
+        .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+      const printedDebit = shownEntries
+        .filter((e) => e.type === "DEBIT")
+        .reduce((sum, e) => sum + Number(e.amount || 0), 0);
       await downloadLedgerPdf({
         items: shownEntries,
         monthName: MONTHS[selectedMonth - 1],
         year: selectedYear,
         entityLabel: data?.entityLabel || (data?.entity === "RVBC" ? "RVBC" : "Rithanya Hospital"),
-        totalCredit: monthCredit,
-        totalDebit: monthDebit,
-        net: monthNet,
+        totalCredit: printedCredit,
+        totalDebit: printedDebit,
+        net: printedCredit - printedDebit,
       });
       toast(`Ledger PDF printed for ${MONTHS[selectedMonth - 1]} ${selectedYear}`);
     } catch (err) {
@@ -397,6 +405,7 @@ export default function FinanceLedgerPage() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
+              name="ledger-search"
               placeholder={`Search ${MONTHS[selectedMonth - 1]} ${selectedYear} ledger...`}
               aria-label="Search ledger"
               className={`${inputCls} pl-9`}
@@ -562,7 +571,7 @@ export default function FinanceLedgerPage() {
             <Field label="Entity *">
               <select
                 className={inputCls}
-                value={formData.entity}
+                name="entity" value={formData.entity}
                 onChange={(e) => setFormData({ ...formData, entity: e.target.value })}
               >
                 <option value="RITHANYA_HOSPITAL">Rithanya Hospital</option>
@@ -573,7 +582,7 @@ export default function FinanceLedgerPage() {
             <Field label="Entry Type *">
               <select
                 className={inputCls}
-                value={formData.type}
+                name="type" value={formData.type}
                 onChange={(e) => setFormData({ ...formData, type: e.target.value })}
               >
                 <option value="DEBIT">Debit (Expense / Outflow)</option>
@@ -586,7 +595,7 @@ export default function FinanceLedgerPage() {
                 type="text"
                 className={inputCls}
                 placeholder="e.g. Medical consumables batch, Oxygen refilling"
-                value={formData.itemName}
+                name="itemName" value={formData.itemName}
                 onChange={(e) => setFormData({ ...formData, itemName: e.target.value })}
                 required
               />
@@ -597,7 +606,7 @@ export default function FinanceLedgerPage() {
                 type="text"
                 className={inputCls}
                 placeholder="e.g. Cipla Pharma, TSSPDCL, Staff Salaries"
-                value={formData.vendorPayee}
+                name="vendorPayee" value={formData.vendorPayee}
                 onChange={(e) => setFormData({ ...formData, vendorPayee: e.target.value })}
                 required
               />
@@ -610,7 +619,7 @@ export default function FinanceLedgerPage() {
                 step="0.01"
                 className={inputCls}
                 placeholder="0.00"
-                value={formData.amount}
+                name="amount" value={formData.amount}
                 onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
                 required
               />
@@ -619,7 +628,7 @@ export default function FinanceLedgerPage() {
             <Field label="Expense Category">
               <select
                 className={inputCls}
-                value={formData.categoryId}
+                name="categoryId" value={formData.categoryId}
                 onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
               >
                 <option value="">Uncategorised</option>
@@ -634,7 +643,7 @@ export default function FinanceLedgerPage() {
             <Field label="Payment Mode">
               <select
                 className={inputCls}
-                value={formData.method}
+                name="method" value={formData.method}
                 onChange={(e) => setFormData({ ...formData, method: e.target.value })}
               >
                 <option value="Cash">Cash</option>
@@ -648,7 +657,7 @@ export default function FinanceLedgerPage() {
               <input
                 type="date"
                 className={inputCls}
-                value={formData.entryDate}
+                name="entryDate" value={formData.entryDate}
                 onChange={(e) => setFormData({ ...formData, entryDate: e.target.value })}
                 required
               />
@@ -659,7 +668,7 @@ export default function FinanceLedgerPage() {
                 rows={3}
                 className={inputCls}
                 placeholder="Optional invoice number, remarks, or batch notes"
-                value={formData.description}
+                name="description" value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               />
             </Field>

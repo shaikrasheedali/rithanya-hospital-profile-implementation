@@ -22,6 +22,12 @@ export default function AccessUsersPage() {
       ]
     : [{ value: "STAFF", label: "Staff" }];
 
+  // Rows this account cannot manage (the server returns `editable` per row from
+  // canActorManageUser): admins may only manage Staff, nobody manages their own
+  // account or other superadmins. Locking them hides Edit/Delete instead of
+  // showing a form the server will reject.
+  const lockedIds = data.items.filter((u: { id: string; editable?: boolean }) => u.editable === false).map((u: { id: string }) => u.id);
+
   return (
     <CrudManager
       title={isSuperadmin ? "User accounts" : "Staff accounts"}
@@ -33,6 +39,7 @@ export default function AccessUsersPage() {
       resource="users"
       singular={isSuperadmin ? "User" : "Staff Account"}
       rows={data.items}
+      lockedIds={lockedIds}
       defaults={{ role: "STAFF", isActive: true }}
       columns={[
         { key: "fullName", label: "Name", sub: "username" },

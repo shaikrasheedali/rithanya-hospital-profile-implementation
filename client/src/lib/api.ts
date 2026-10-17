@@ -31,6 +31,12 @@ export async function api<T = unknown>(
       credentials: "same-origin",
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
+    // Session expired: send the user to the login page instead of showing a
+    // bare "Request failed (401)" toast (reads already did this via the hook).
+    if (res.status === 401) {
+      if (typeof window !== "undefined") window.location.href = "/portal/login";
+      return { ok: false, error: "Your session has expired — please sign in again." };
+    }
     const json = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: (json as { error?: string }).error || `Request failed (${res.status})` };
     return { ok: true, data: ((json as { data?: T }).data ?? json) as T };

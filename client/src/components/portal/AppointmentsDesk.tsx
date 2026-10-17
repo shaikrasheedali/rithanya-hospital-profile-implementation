@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { Phone, Trash2 } from "lucide-react";
 import { Badge, Btn, Card, Empty, PageHeader, api, inputCls, useToast } from "@/components/portal/ui";
 import { formatDate, telHref } from "@/lib/utils";
+import { softRefresh } from "@/lib/softRefresh";
 
 type A = { id: string; fullName: string; phone: string; department: string; preferredDate: string; message: string; source: string; status: string; createdAt: string };
 const TONE: Record<string, "blue" | "green" | "slate" | "red"> = { NEW: "blue", CONFIRMED: "green", COMPLETED: "slate", CANCELLED: "red" };
@@ -23,7 +24,7 @@ export function AppointmentsDesk({ rows = [] }: { rows?: A[] }) {
     setBusyId(null);
     if (!r.ok) return toast(r.error || "Update failed — please try again.", "err");
     toast(`Appointment marked ${status.toLowerCase()}`);
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => softRefresh(), 1200);
   }
   async function del(id: string) {
     if (!confirm("Delete this request?")) return;
@@ -32,7 +33,7 @@ export function AppointmentsDesk({ rows = [] }: { rows?: A[] }) {
     setBusyId(null);
     if (!r.ok) return toast(r.error || "Delete failed — please try again.", "err");
     toast("Appointment request deleted");
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => softRefresh(), 1200);
   }
 
   return (
@@ -56,7 +57,7 @@ export function AppointmentsDesk({ rows = [] }: { rows?: A[] }) {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <a href={telHref(a.phone)} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700"><Phone className="h-4 w-4" /> {a.phone}</a>
-                  <select aria-label="Status" value={a.status} disabled={busyId === a.id} onChange={(e) => setStatus(a.id, e.target.value)} className={`${inputCls} !w-auto`}>{["NEW", "CONFIRMED", "COMPLETED", "CANCELLED"].map((s) => <option key={s}>{s}</option>)}</select>
+                  <select aria-label="Status" name="appointment-status" id={`appt-status-${a.id}`} value={a.status} disabled={busyId === a.id} onChange={(e) => setStatus(a.id, e.target.value)} className={`${inputCls} !w-auto`}>{["NEW", "CONFIRMED", "COMPLETED", "CANCELLED"].map((s) => <option key={s}>{s}</option>)}</select>
                   <Btn small variant="ghost" disabled={busyId === a.id} onClick={() => del(a.id)} aria-label="Delete" className="!text-alert"><Trash2 className="h-4 w-4" /></Btn>
                 </div>
               </li>

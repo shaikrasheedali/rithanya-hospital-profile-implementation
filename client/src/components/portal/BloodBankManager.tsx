@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { Droplet, Minus, Plus, RefreshCw, Save } from "lucide-react";
 import { Btn, PageHeader, api, useToast } from "@/components/portal/ui";
 import { formatDate } from "@/lib/utils";
+import { softRefresh } from "@/lib/softRefresh";
 
 type Row = {
   bloodGroup: string;
@@ -39,6 +40,7 @@ function Stepper({ label, value, onChange, fg }: { label: string; value: number;
         </button>
         <input
           aria-label={label}
+          name={`blood-bank-${label.toLowerCase().replace(/\s+/g, "-")}`}
           type="number"
           min={0}
           value={value}
@@ -118,7 +120,7 @@ export function BloodBankManager({ initial, threshold }: { initial: Row[]; thres
     setBusy(false);
     if (!r.ok) return toast(r.error || "Save failed — please try again.", "err");
     toast("Stock saved — public website is now in sync");
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => softRefresh(), 1200);
   }
 
   return (

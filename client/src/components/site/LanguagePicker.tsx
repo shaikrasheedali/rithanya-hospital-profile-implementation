@@ -16,6 +16,14 @@ export function LanguagePicker({ dark = false }: { dark?: boolean }) {
   useEffect(() => {
     const m = document.cookie.match(/googtrans=\/en\/(\w+)/);
     if (m) setLang(m[1]);
+    // The translate engine is a third-party script. Only load it once the
+    // visitor has actually chosen a non-English language (the selection flow
+    // sets the `googtrans` cookie and reloads) — every other page view stays
+    // free of external scripts.
+    if (m && m[1] && m[1] !== "en") loadTranslateScript();
+  }, []);
+
+  function loadTranslateScript() {
     if (document.getElementById("google-translate-script")) return;
     window.googleTranslateElementInit = () => {
       if (!window.google) return;
@@ -29,7 +37,7 @@ export function LanguagePicker({ dark = false }: { dark?: boolean }) {
     s.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
     s.async = true;
     document.body.appendChild(s);
-  }, []);
+  }
 
   function change(code: string) {
     setLang(code);
@@ -59,6 +67,7 @@ export function LanguagePicker({ dark = false }: { dark?: boolean }) {
         <select
           value={lang}
           onChange={(e) => change(e.target.value)}
+          name="language"
           className="cursor-pointer bg-transparent pr-1 outline-none [&>option]:text-navy"
           aria-label="Select language"
         >

@@ -343,5 +343,7 @@ export async function downloadLedgerPdf(data: LedgerPdfData): Promise<void> {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Revoke late — Safari/Firefox may still be reading the blob when click()
+  // returns, which aborted the save dialog.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

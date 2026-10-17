@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronDown, MapPin, Phone, Radio, Trash2 } from "lucide-react";
 import { Badge, Btn, Card, Empty, PageHeader, api, inputCls, useToast } from "@/components/portal/ui";
 import { formatDate, formatINR } from "@/lib/utils";
+import { softRefresh } from "@/lib/softRefresh";
 
 export type OrderDTO = {
   id: string; orderNumber: string; customerName: string; phoneNumber: string; shippingAddress: string; pinCode: string;
@@ -26,7 +27,7 @@ export function OrdersDesk({ orders }: { orders: OrderDTO[] }) {
     setBusyId(null);
     if (!r.ok) return toast(r.error || "Update failed — please try again.", "err");
     toast(`Order marked ${status.toLowerCase()}`);
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => softRefresh(), 1200);
   }
 
   async function deleteOrderRecord(id: string, orderNumber: string) {
@@ -39,7 +40,7 @@ export function OrdersDesk({ orders }: { orders: OrderDTO[] }) {
     if (!r.ok) return toast(r.error || "Delete failed — please try again.", "err");
     toast(`Order ${orderNumber} deleted successfully.`);
     setOpenId(null);
-    setTimeout(() => window.location.reload(), 1000);
+    setTimeout(() => softRefresh(), 1000);
   }
 
   const list = (orders ?? []).filter((o) => f === "ALL" || o.status === f);
@@ -47,7 +48,7 @@ export function OrdersDesk({ orders }: { orders: OrderDTO[] }) {
   return (
     <>
       <PageHeader title="Orders dispatch desk" desc="Live feed of storefront orders. Move each order through Pending → Paid → Processing → Dispatched → Delivered (cancelling restores stock).">
-        <button onClick={() => window.location.reload()} className="flex items-center gap-2 text-base text-ink/70 hover:text-royal"><Radio className="h-4 w-4 text-emerald-600" /> Refresh list</button>
+        <button onClick={() => softRefresh()} className="flex items-center gap-2 text-base text-ink/70 hover:text-royal"><Radio className="h-4 w-4 text-emerald-600" /> Refresh list</button>
       </PageHeader>
       <div className="mb-4 flex flex-wrap gap-2">
         {["ALL", ...FLOW, "CANCELLED"].map((s) => (
@@ -109,7 +110,7 @@ export function OrdersDesk({ orders }: { orders: OrderDTO[] }) {
                         </ol>
                         <div className="flex flex-wrap items-center gap-3">
                           {next && o.status !== "CANCELLED" && <Btn onClick={() => setStatus(o.id, next)}>Mark as {next.toLowerCase()}</Btn>}
-                          <select aria-label="Set status" value={o.status} disabled={o.status === "CANCELLED"} onChange={(e) => setStatus(o.id, e.target.value)} className={`${inputCls} !w-auto`}>
+                          <select aria-label="Set status" name="order-status" id={`order-status-${o.id}`} value={o.status} disabled={o.status === "CANCELLED"} onChange={(e) => setStatus(o.id, e.target.value)} className={`${inputCls} !w-auto`}>
                             {[...FLOW, "CANCELLED"].map((s) => <option key={s}>{s}</option>)}
                           </select>
                           {o.status !== "CANCELLED" && o.status !== "DELIVERED" && <Btn variant="danger" onClick={() => confirm("Cancel this order and restore stock?") && setStatus(o.id, "CANCELLED")}>Cancel order</Btn>}

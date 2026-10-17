@@ -48,10 +48,10 @@ export function ProductGrid({ products }: { products: ProductDTO[] }) {
         <label className="relative block w-full sm:w-96">
           <span className="sr-only">Search products</span>
           <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-ink/50" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search glucometer, strips, BP monitor…" className="w-full rounded-full border border-line bg-white py-3 pl-12 pr-4 focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/20" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} name="product-search" aria-label="Search products" placeholder="Search glucometer, strips, BP monitor…" className="w-full rounded-full border border-line bg-white py-3 pl-12 pr-4 focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/20" />
         </label>
         <label className="flex cursor-pointer items-center gap-2.5 font-medium">
-          <input type="checkbox" checked={inStock} onChange={(e) => setInStock(e.target.checked)} className="h-5 w-5 accent-[#0D47A1]" /> In stock only
+          <input type="checkbox" checked={inStock} onChange={(e) => setInStock(e.target.checked)} name="in-stock-only" className="h-5 w-5 accent-[#0D47A1]" /> In stock only
         </label>
       </div>
       <div className="mt-5 flex flex-wrap gap-2">

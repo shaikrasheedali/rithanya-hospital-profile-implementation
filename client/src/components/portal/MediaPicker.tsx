@@ -4,11 +4,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Film, ImagePlus, Library, Loader2, Play, Search, Upload, X } from "lucide-react";
 import { Btn, Modal, api, useToast } from "@/components/portal/ui";
 import { SafeImg, SafeVideo } from "@/components/site/ui";
+import { prepareFilesForUpload } from "@/lib/imagePrep";
 import type { MediaRef } from "@/lib/utils";
 
 export type Asset = MediaRef & { sizeInBytes: number; refs?: number; linkedTo?: string[]; createdAt?: string; filename?: string };
 
 export const fmtSize = (n: number) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+/**
+ * Square-ish cached thumbnail served by the API (`?thumb=` generation is
+ * cached on disk server-side). Only applies to images served from
+ * `/api/media/...` or `/seed/...`; anything else keeps its original URL.
+ */
+export function thumbUrl(url: string, px = 320): string {
+  if (!url) return url;
+  const m = /^\/(?:api\/media|seed)\/([^/?#]+)/.exec(url);
+  if (!m) return url;
+  return `/api/media/${m[1]}?thumb=${px}`;
+}
 
 export function Thumb({ m, className = "" }: { m: Pick<MediaRef, "url" | "kind">; className?: string }) {
   return m.kind === "VIDEO" ? (
@@ -17,7 +30,7 @@ export function Thumb({ m, className = "" }: { m: Pick<MediaRef, "url" | "kind">
       <span className="absolute inset-0 flex items-center justify-center text-white"><Play className="h-6 w-6 drop-shadow" /></span>
     </div>
   ) : (
-    <SafeImg src={m.url} alt="" className={`object-cover ${className}`} />
+    <SafeImg src={thumbUrl(m.url)} alt="" className={`object-cover ${className}`} />
   );
 }
 
@@ -71,15 +84,18 @@ export function MediaPickerModal({
   async function upload(files: FileList | File[]) {
     const list = Array.from(files);
     if (!list.length) return;
-    const tooBig = list.find((f) => f.size > 10 * 1024 * 1024 && f.type.startsWith("image/"));
-    if (tooBig) {
-      toast(`${tooBig.name} exceeds 10MB — please compress and retry.`, "err");
-      return;
-    }
     setUploading(true);
-    const fd = new FormData();
-    list.forEach((f) => fd.append("files", f));
     try {
+      // Downscale/re-encode big camera files in the browser first — the upload
+      // itself becomes several times smaller and faster.
+      const prepared = await prepareFilesForUpload(list);
+      const tooBig = prepared.find((f) => f.size > 10 * 1024 * 1024 && f.type.startsWith("image/"));
+      if (tooBig) {
+        toast(`${tooBig.name} exceeds 10MB — please compress and retry.`, "err");
+        return;
+      }
+      const fd = new FormData();
+      prepared.forEach((f) => fd.append("files", f));
       const res = await fetch("/api/portal/media", { method: "POST", body: fd });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((json as { error?: string }).error || "Upload failed — please try again.");
@@ -166,10 +182,10 @@ export function MediaPickerModal({
           <>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink/50" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search files…" aria-label="Search files" className="rounded-lg border border-line py-2 pl-9 pr-3 text-base focus:border-royal focus:outline-none" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} name="picker-search" placeholder="Search files…" aria-label="Search files" className="rounded-lg border border-line py-2 pl-9 pr-3 text-base focus:border-royal focus:outline-none" />
             </div>
             {!imagesOnly && (
-              <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} aria-label="Filter type" className="rounded-lg border border-line px-3 py-2 text-base">
+              <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} name="picker-kind" aria-label="Filter type" className="rounded-lg border border-line px-3 py-2 text-base">
                 <option value="ALL">All media</option><option value="IMAGE">Images</option><option value="VIDEO">Videos</option>
               </select>
             )}
@@ -187,7 +203,7 @@ export function MediaPickerModal({
           {uploading ? <Loader2 className="h-12 w-12 animate-spin text-royal" /> : <ImagePlus className="h-12 w-12 text-royal" />}
           <p className="mt-4 text-lg font-semibold text-navy">{uploading ? "Optimising & uploading…" : "Drag & drop files here"}</p>
           <p className="mt-1 max-w-md text-base text-ink/70">Images are converted to WebP (under 10MB, metadata stripped). Videos: MP4, WebM or MOV up to 120MB.</p>
-          <input ref={fileRef} type="file" multiple={!single} accept={imagesOnly ? "image/*" : "image/*,video/mp4,video/webm,video/quicktime,video/ogg"} className="sr-only" onChange={(e) => e.target.files && upload(e.target.files)} />
+          <input ref={fileRef} type="file" multiple={!single} name="picker-files" accept={imagesOnly ? "image/*" : "image/*,video/mp4,video/webm,video/quicktime,video/ogg"} className="sr-only" onChange={(e) => e.target.files && upload(e.target.files)} />
           <Btn className="mt-5" disabled={uploading} onClick={() => fileRef.current?.click()}>Choose files</Btn>
         </div>
       ) : loading ? (

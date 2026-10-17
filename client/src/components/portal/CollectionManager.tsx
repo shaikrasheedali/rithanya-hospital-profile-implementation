@@ -144,7 +144,7 @@ export function CollectionManager({
       case "textarea":
         control = (
           <>
-            <textarea rows={3} maxLength={f.max} required={!!f.required} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)} />
+            <textarea rows={3} maxLength={f.max} required={!!f.required} name={f.name} id={`cm-${f.name}`} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)} />
             {f.max && <span className="mt-1 block text-right text-sm text-ink/60">{String(v ?? "").length}/{f.max}</span>}
           </>
         );
@@ -153,14 +153,14 @@ export function CollectionManager({
         control = <RichTextEditor key={String(editing === "new" ? "new" : (editing as Item)?.id)} value={String(v ?? "")} onChange={(h) => set(f.name, h)} />;
         break;
       case "number":
-        control = <input type="number" required={!!f.required} className={inputCls} value={String(v ?? 0)} onChange={(e) => set(f.name, e.target.value === "" ? 0 : Number(e.target.value))} />;
+        control = <input type="number" required={!!f.required} name={f.name} id={`cm-${f.name}`} className={inputCls} value={String(v ?? 0)} onChange={(e) => set(f.name, e.target.value === "" ? 0 : Number(e.target.value))} />;
         break;
       case "decimal":
-        control = <input type="number" step="0.01" min="0" required={!!f.required} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value === "" ? 0 : Number(e.target.value))} />;
+        control = <input type="number" step="0.01" min="0" required={!!f.required} name={f.name} id={`cm-${f.name}`} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value === "" ? 0 : Number(e.target.value))} />;
         break;
       case "select":
         control = (
-          <select required={!!f.required} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)}>
+          <select required={!!f.required} name={f.name} id={`cm-${f.name}`} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)}>
             {f.options?.map((o) => <option key={o}>{o}</option>)}
           </select>
         );
@@ -168,12 +168,12 @@ export function CollectionManager({
       case "checkbox":
         return (
           <label key={f.name} className={`flex cursor-pointer items-center gap-3 self-end rounded-lg border border-line px-4 py-3 ${span}`}>
-            <input type="checkbox" className="h-5 w-5 accent-[#0D47A1]" checked={Boolean(v)} onChange={(e) => set(f.name, e.target.checked)} />
+            <input type="checkbox" name={f.name} id={`cm-${f.name}`} className="h-5 w-5 accent-[#0D47A1]" checked={Boolean(v)} onChange={(e) => set(f.name, e.target.checked)} />
             <span className="text-base font-medium">{f.label}</span>
           </label>
         );
       default:
-        control = <input required={!!f.required} maxLength={f.max} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)} />;
+        control = <input required={!!f.required} maxLength={f.max} name={f.name} id={`cm-${f.name}`} className={inputCls} value={String(v ?? "")} onChange={(e) => set(f.name, e.target.value)} />;
     }
     return (
       <Field key={f.name} label={f.label + (f.required ? " *" : "")} help={f.help} className={span}>
@@ -211,7 +211,7 @@ export function CollectionManager({
         <div className="border-b border-line p-4">
           <div className="relative max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink/50" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${def.label.toLowerCase()}…`} aria-label="Search" className={`${inputCls} pl-9`} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} name="collection-search" placeholder={`Search ${def.label.toLowerCase()}…`} aria-label="Search" className={`${inputCls} pl-9`} />
           </div>
         </div>
         {shown.length === 0 ? (

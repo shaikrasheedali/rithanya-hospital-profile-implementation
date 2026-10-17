@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Globe, ImagePlus, Save, X } from "lucide-react";
 import { MediaPickerModal } from "@/components/portal/MediaPicker";
 import { Btn, Card, Field, PageHeader, api, inputCls, useToast } from "@/components/portal/ui";
+import { softRefresh } from "@/lib/softRefresh";
 import type { Settings } from "@/lib/settings";
 
 type S = Pick<Settings, "legalName" | "clinicalTagline" | "emergencyHotline" | "secondaryHotline" | "whatsappNumber" | "email" | "physicalAddress" | "opdTimings" | "noticeBanner" | "criticalBloodAlertThreshold" | "seoPageTitle" | "metaDescription" | "targetKeywords" | "canonicalUrl" | "robotsIndexFollow" | "faviconUrl" | "socialShareThumbnailUrl">;
@@ -39,7 +40,7 @@ export function MasterSettingsForm({ s }: { s: S }) {
     setBusy(false);
     if (!r.ok) return toast(r.error || "Save failed — please try again.", "err");
     toast("Master identity saved");
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => softRefresh(), 1200);
   }
 
   return (
@@ -50,21 +51,21 @@ export function MasterSettingsForm({ s }: { s: S }) {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="space-y-4 p-6">
           <h2 className="text-lg font-semibold">Identity</h2>
-          <Field label="Legal name"><input required className={inputCls} value={v.legalName} onChange={(e) => set("legalName", e.target.value)} /></Field>
-          <Field label="Clinical tagline"><input className={inputCls} value={v.clinicalTagline} onChange={(e) => set("clinicalTagline", e.target.value)} /></Field>
-          <Field label="Physical address"><textarea rows={3} className={inputCls} value={v.physicalAddress} onChange={(e) => set("physicalAddress", e.target.value)} /></Field>
-          <Field label="Notice banner (yellow strip; leave blank to hide)"><textarea rows={2} className={inputCls} value={v.noticeBanner} onChange={(e) => set("noticeBanner", e.target.value)} /></Field>
+          <Field label="Legal name"><input required className={inputCls} name="legalName" value={v.legalName} onChange={(e) => set("legalName", e.target.value)} /></Field>
+          <Field label="Clinical tagline"><input className={inputCls} name="clinicalTagline" value={v.clinicalTagline} onChange={(e) => set("clinicalTagline", e.target.value)} /></Field>
+          <Field label="Physical address"><textarea rows={3} className={inputCls} name="physicalAddress" value={v.physicalAddress} onChange={(e) => set("physicalAddress", e.target.value)} /></Field>
+          <Field label="Notice banner (yellow strip; leave blank to hide)"><textarea rows={2} className={inputCls} name="noticeBanner" value={v.noticeBanner} onChange={(e) => set("noticeBanner", e.target.value)} /></Field>
         </Card>
         <Card className="space-y-4 p-6">
           <h2 className="text-lg font-semibold">Contact & timings</h2>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Emergency hotline"><input required className={inputCls} value={v.emergencyHotline} onChange={(e) => set("emergencyHotline", e.target.value)} /></Field>
-            <Field label="Secondary / enquiry line"><input className={inputCls} value={v.secondaryHotline} onChange={(e) => set("secondaryHotline", e.target.value)} /></Field>
-            <Field label="WhatsApp number (with country code)" help="e.g. 918328581019"><input className={inputCls} value={v.whatsappNumber} onChange={(e) => set("whatsappNumber", e.target.value)} /></Field>
-            <Field label="Email"><input type="email" className={inputCls} value={v.email} onChange={(e) => set("email", e.target.value)} /></Field>
+            <Field label="Emergency hotline"><input required className={inputCls} name="emergencyHotline" value={v.emergencyHotline} onChange={(e) => set("emergencyHotline", e.target.value)} /></Field>
+            <Field label="Secondary / enquiry line"><input className={inputCls} name="secondaryHotline" value={v.secondaryHotline} onChange={(e) => set("secondaryHotline", e.target.value)} /></Field>
+            <Field label="WhatsApp number (with country code)" help="e.g. 918328581019"><input className={inputCls} name="whatsappNumber" value={v.whatsappNumber} onChange={(e) => set("whatsappNumber", e.target.value)} /></Field>
+            <Field label="Email"><input type="email" className={inputCls} name="email" value={v.email} onChange={(e) => set("email", e.target.value)} /></Field>
           </div>
-          <Field label="OPD & daycare timing specification"><input className={inputCls} value={v.opdTimings} onChange={(e) => set("opdTimings", e.target.value)} /></Field>
-          <Field label="Blood bank critical threshold (units)" help="Stock at or below this number shows a critical alert on the public site and dashboard."><input type="number" min={0} className={inputCls} value={v.criticalBloodAlertThreshold} onChange={(e) => set("criticalBloodAlertThreshold", e.target.value)} /></Field>
+          <Field label="OPD & daycare timing specification"><input className={inputCls} name="opdTimings" value={v.opdTimings} onChange={(e) => set("opdTimings", e.target.value)} /></Field>
+          <Field label="Blood bank critical threshold (units)" help="Stock at or below this number shows a critical alert on the public site and dashboard."><input type="number" min={0} className={inputCls} name="criticalBloodAlertThreshold" value={v.criticalBloodAlertThreshold} onChange={(e) => set("criticalBloodAlertThreshold", e.target.value)} /></Field>
         </Card>
       </div>
     </form>
@@ -123,7 +124,7 @@ export function SeoSettingsForm({ s }: { s: S }) {
     setBusy(false);
     if (!r.ok) return toast(r.error || "Save failed — please try again.", "err");
     toast("SEO & social metadata saved");
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => softRefresh(), 1200);
   }
 
   return (
@@ -133,12 +134,12 @@ export function SeoSettingsForm({ s }: { s: S }) {
       </PageHeader>
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="space-y-4 p-6">
-          <Field label="SEO page title" help={`${v.seoPageTitle.length} characters — aim for under 60`}><input className={inputCls} value={v.seoPageTitle} onChange={(e) => set("seoPageTitle", e.target.value)} /></Field>
-          <Field label="Meta description" help={`${v.metaDescription.length} characters — aim for 120–160`}><textarea rows={4} className={inputCls} value={v.metaDescription} onChange={(e) => set("metaDescription", e.target.value)} /></Field>
-          <Field label="Target keywords (comma separated)"><textarea rows={2} className={inputCls} value={v.targetKeywords} onChange={(e) => set("targetKeywords", e.target.value)} /></Field>
-          <Field label="Canonical URL"><input type="url" className={inputCls} value={v.canonicalUrl} onChange={(e) => set("canonicalUrl", e.target.value)} /></Field>
+          <Field label="SEO page title" help={`${v.seoPageTitle.length} characters — aim for under 60`}><input className={inputCls} name="seoPageTitle" value={v.seoPageTitle} onChange={(e) => set("seoPageTitle", e.target.value)} /></Field>
+          <Field label="Meta description" help={`${v.metaDescription.length} characters — aim for 120–160`}><textarea rows={4} className={inputCls} name="metaDescription" value={v.metaDescription} onChange={(e) => set("metaDescription", e.target.value)} /></Field>
+          <Field label="Target keywords (comma separated)"><textarea rows={2} className={inputCls} name="targetKeywords" value={v.targetKeywords} onChange={(e) => set("targetKeywords", e.target.value)} /></Field>
+          <Field label="Canonical URL"><input type="url" className={inputCls} name="canonicalUrl" value={v.canonicalUrl} onChange={(e) => set("canonicalUrl", e.target.value)} /></Field>
           <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-line px-4 py-3">
-            <input type="checkbox" className="h-5 w-5 accent-[#0D47A1]" checked={v.robotsIndexFollow} onChange={(e) => set("robotsIndexFollow", e.target.checked)} />
+            <input type="checkbox" name="robotsIndexFollow" className="h-5 w-5 accent-[#0D47A1]" checked={v.robotsIndexFollow} onChange={(e) => set("robotsIndexFollow", e.target.checked)} />
             <span><span className="block text-base font-medium">Allow search engines to index & follow</span><span className="text-sm text-ink/65">{v.robotsIndexFollow ? "robots: index, follow" : "robots: noindex, nofollow — site will be hidden from search"}</span></span>
           </label>
           <AssetPick label="Favicon (32×32 or 64×64 square image)" help="Pick a square image from the media library or upload one." value={v.faviconUrl} onChange={(u) => set("faviconUrl", u)} />

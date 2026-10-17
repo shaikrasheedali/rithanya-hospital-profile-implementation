@@ -74,7 +74,6 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
   const [stock, setStock] = useState(() => normalizeStock(initial));
   const [checked, setChecked] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-
   useEffect(() => {
     let alive = true;
     const pull = async () => {
@@ -144,6 +143,8 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
           const cat = (s.groupCategory || s.bloodGroup).replace(/[+-]/g, "");
           const t = THEME[cat] ?? THEME[s.groupCategory || ""] ?? THEME.AB;
           const displayGroup = s.bloodGroup || s.groupCategory;
+          const totalUnits = (s.wholeBloodUnits ?? 0) + (s.packedCellsUnits ?? 0) + (s.plasmaUnits ?? 0);
+          const critical = totalUnits <= threshold;
           const rows = [
             { label: "WB: Whole Blood", value: s.wholeBloodUnits ?? 0 },
             { label: "PC: Packed Cells (PRBC)", value: s.packedCellsUnits ?? 0 },
@@ -157,6 +158,14 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
               aria-label={`Blood group ${displayGroup}: ${s.wholeBloodUnits ?? 0} WB units, ${s.packedCellsUnits ?? 0} PC units, ${s.plasmaUnits ?? 0} FFP units`}
             >
               <Droplet className="absolute -right-6 -top-6 h-40 w-40 opacity-15" style={{ color: t.fg }} aria-hidden />
+              {critical && (
+                <span
+                  className="absolute right-3 top-3 z-10 rounded-full border border-red-600/25 bg-white px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-red-600 shadow-sm"
+                  title={`At or below the critical alert threshold (${threshold} unit${threshold === 1 ? "" : "s"})`}
+                >
+                  Critical stock
+                </span>
+              )}
               <div className="relative flex items-end justify-between">
                 <div>
                   <p className="text-sm font-semibold uppercase tracking-widest" style={{ color: t.sub }}>Group</p>

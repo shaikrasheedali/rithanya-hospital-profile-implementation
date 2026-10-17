@@ -17,6 +17,13 @@ export const DEPARTMENTS = [
   "Visiting Specialties",
 ];
 
+/**
+ * Today's date (YYYY-MM-DD) in Asia/Kolkata. The hospital operates in IST while
+ * the visitor's browser may be in any timezone — `toISOString()` is UTC, so
+ * between 00:00 and 05:30 IST it reports yesterday and rejects valid dates.
+ */
+const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
 export function AppointmentForm({
   defaultDepartment = "",
   source = "WEBSITE",
@@ -44,7 +51,7 @@ export function AppointmentForm({
       return;
     }
     if (f.preferredDate) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayIST();
       if (f.preferredDate < today) {
         const msg = "Preferred date cannot be in the past.";
         setError(msg);
@@ -91,15 +98,15 @@ export function AppointmentForm({
       <div className={`grid gap-4 ${compact ? "" : "sm:grid-cols-2"}`}>
         <label className="block">
           <span className="mb-1 block text-sm font-semibold text-navy">Full name *</span>
-          <input required minLength={2} className={input} value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} autoComplete="name" />
+          <input required minLength={2} name="fullName" id="booking-fullName" className={input} value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} autoComplete="name" />
         </label>
         <label className="block">
           <span className="mb-1 block text-sm font-semibold text-navy">Mobile number *</span>
-          <input required type="tel" inputMode="tel" pattern="[0-9+()\\-\\s]{10,15}" title="Enter a valid 10-digit mobile number" className={input} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} autoComplete="tel" />
+          <input required type="tel" inputMode="tel" name="phone" id="booking-phone" pattern="[0-9+()\\-\\s]{10,15}" title="Enter a valid 10-digit mobile number" className={input} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} autoComplete="tel" />
         </label>
         <label className="block">
           <span className="mb-1 block text-sm font-semibold text-navy">Department</span>
-          <select className={input} value={f.department} onChange={(e) => setF({ ...f, department: e.target.value })}>
+          <select name="department" id="booking-department" className={input} value={f.department} onChange={(e) => setF({ ...f, department: e.target.value })}>
             <option value="">General consultation</option>
             {DEPARTMENTS.map((d) => (
               <option key={d}>{d}</option>
@@ -108,12 +115,12 @@ export function AppointmentForm({
         </label>
         <label className="block">
           <span className="mb-1 block text-sm font-semibold text-navy">Preferred date</span>
-          <input type="date" className={input} min={new Date().toISOString().slice(0, 10)} value={f.preferredDate} onChange={(e) => setF({ ...f, preferredDate: e.target.value })} />
+          <input type="date" name="preferredDate" id="booking-preferredDate" className={input} min={todayIST()} value={f.preferredDate} onChange={(e) => setF({ ...f, preferredDate: e.target.value })} />
         </label>
       </div>
       <label className="block">
         <span className="mb-1 block text-sm font-semibold text-navy">How can we help?</span>
-        <textarea rows={3} className={input} value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} />
+        <textarea rows={3} name="message" id="booking-message" className={input} value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} />
       </label>
       {error && (
         <p role="alert" className="rounded-lg bg-alert/10 p-3 text-sm font-medium text-alert">

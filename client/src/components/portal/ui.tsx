@@ -3,30 +3,19 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { toast } from "sonner";
-import { entityHeader } from "@/lib/api";
+import { api as coreApi } from "@/lib/api";
 
+/**
+ * Portal mutation helper. Delegates to the single `lib/api` implementation so
+ * error handling (including the 401 → login redirect) lives in exactly one
+ * place — the local copy used to toast "Request failed (401)" forever.
+ */
 export async function api<T = unknown>(
   url: string,
   method: "GET" | "POST" | "PUT" | "DELETE",
   body?: unknown,
 ): Promise<{ ok: boolean; data?: T; error?: string }> {
-  try {
-    const headers: Record<string, string> = { ...entityHeader() };
-    if (body !== undefined) {
-      headers["Content-Type"] = "application/json";
-    }
-    const res = await fetch(url, {
-      method,
-      headers,
-      credentials: "same-origin",
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) return { ok: false, error: json.error || `Request failed (${res.status})` };
-    return { ok: true, data: (json.data ?? json) as T };
-  } catch {
-    return { ok: false, error: "Network error — please try again." };
-  }
+  return coreApi<T>(url, method, body);
 }
 
 /* ---------- Toasts (sonner-backed; keeps legacy useToast API) ---------- */
@@ -180,6 +169,7 @@ export function EntityPicker({
       Entity
       <select
         value={val}
+        name="entity-switcher"
         onChange={(e) => handleChange(e.target.value as "RITHANYA_HOSPITAL" | "RVBC")}
         className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm font-semibold text-navy shadow-sm"
       >

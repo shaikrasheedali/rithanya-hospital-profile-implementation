@@ -53,7 +53,7 @@ export default function HrPayrollPage() {
       year={data.year}
       entity={data.entity}
       entityLabel={entityLabel}
-      authorizer="Authoriser"
+      authorizer="Medical Superintendent / HR Director"
     />
   );
 }

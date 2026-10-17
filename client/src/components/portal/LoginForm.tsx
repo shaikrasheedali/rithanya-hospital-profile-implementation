@@ -76,14 +76,14 @@ export function LoginForm() {
               <span className="mb-1 block text-sm font-semibold text-navy">Username or email</span>
               <span className="relative block">
                 <User className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-ink/50" />
-                <input value={username} onChange={(e) => setUsername(e.target.value)} required autoComplete="username" className={`${inputCls} !py-3 pl-11`} />
+                <input value={username} onChange={(e) => setUsername(e.target.value)} required name="username" id="login-username" autoComplete="username" className={`${inputCls} !py-3 pl-11`} />
               </span>
             </label>
             <label className="block">
               <span className="mb-1 block text-sm font-semibold text-navy">Password</span>
               <span className="relative block">
                 <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-ink/50" />
-                <input type={show ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" className={`${inputCls} !py-3 pl-11 pr-12`} />
+                <input type={show ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} required name="password" id="login-password" autoComplete="current-password" className={`${inputCls} !py-3 pl-11 pr-12`} />
                 <button type="button" onClick={() => setShow((v) => !v)} aria-label={show ? "Hide password" : "Show password"} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-ink/60 hover:text-royal">
                   {show ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>

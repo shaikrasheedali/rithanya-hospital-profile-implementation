@@ -40,6 +40,15 @@ export function ConsentCameraModal({ onCaptureComplete, onCancel }: { onCaptureC
     };
   }, []);
 
+  // Escape dismisses the modal like every other modal in the portal.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
   function capture() {
     const v = videoRef.current;
     const c = canvasRef.current;
@@ -64,7 +73,7 @@ export function ConsentCameraModal({ onCaptureComplete, onCancel }: { onCaptureC
   }
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-navy/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Patient consent photo capture">
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-navy/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Patient consent photo capture" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
       <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-line bg-white shadow-2xl">
         <div className="flex items-center justify-between bg-navy px-5 py-4 text-white">
           <div className="flex items-center gap-2"><Camera className="h-5 w-5 text-sky-300" /><h3 className="font-heading text-base font-semibold !text-white">Patient consent photo</h3></div>
@@ -76,7 +85,7 @@ export function ConsentCameraModal({ onCaptureComplete, onCancel }: { onCaptureC
               <div className="flex items-start gap-2 rounded-xl bg-red-50 p-4 text-base text-red-800"><AlertTriangle className="mt-0.5 h-5 w-5 flex-none" /><span>{error}</span></div>
               <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-royal bg-canvas py-4 font-semibold text-royal hover:bg-royal/5">
                 <Upload className="h-5 w-5" /> Use a photo from this device instead
-                <input type="file" accept="image/*" capture="user" className="sr-only" onChange={(e) => fromFile(e.target.files?.[0])} />
+                <input type="file" accept="image/*" capture="user" name="consent-photo" className="sr-only" onChange={(e) => fromFile(e.target.files?.[0])} />
               </label>
             </div>
           )}

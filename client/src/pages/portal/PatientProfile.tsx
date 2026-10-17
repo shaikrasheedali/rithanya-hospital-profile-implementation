@@ -81,6 +81,7 @@ function AllergyTagEditor({
           <input
             value={tag}
             onChange={(e) => setTag(e.target.value)}
+            name="allergy-tag"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -163,14 +164,16 @@ function LogVitalsModal({
     }
     const sysNum = parseInt(vitals.bpSystolic, 10) || 120;
     const diaNum = parseInt(vitals.bpDiastolic, 10) || 80;
-    if (sysNum < 50 || sysNum > 300 || diaNum < 30 || diaNum > 200) {
-      return toast("Please enter a valid blood pressure (sys 50–300, dia 30–200).", "err");
+    if (sysNum < 40 || sysNum > 300 || diaNum < 20 || diaNum > 200) {
+      return toast("Please enter a valid blood pressure (sys 40–300, dia 20–200).", "err");
     }
-    if (vitals.fastingGlucose && (Number(vitals.fastingGlucose) < 20 || Number(vitals.fastingGlucose) > 1000)) {
-      return toast("Fasting glucose looks out of range (20–1000 mg/dL).", "err");
+    // Ranges mirror the server (resources.ts vitals validation) so values that
+    // pass here can never come back as a raw 400.
+    if (vitals.fastingGlucose && (Number(vitals.fastingGlucose) < 10 || Number(vitals.fastingGlucose) > 900)) {
+      return toast("Fasting glucose looks out of range (10–900 mg/dL).", "err");
     }
-    if (vitals.postPrandialGlucose && (Number(vitals.postPrandialGlucose) < 20 || Number(vitals.postPrandialGlucose) > 1000)) {
-      return toast("Post-prandial glucose looks out of range (20–1000 mg/dL).", "err");
+    if (vitals.postPrandialGlucose && (Number(vitals.postPrandialGlucose) < 10 || Number(vitals.postPrandialGlucose) > 900)) {
+      return toast("Post-prandial glucose looks out of range (10–900 mg/dL).", "err");
     }
     if (vitals.hbA1c && (Number(vitals.hbA1c) < 2 || Number(vitals.hbA1c) > 20)) {
       return toast("HbA1c looks out of range (2–20%).", "err");
@@ -255,6 +258,7 @@ function LogVitalsModal({
             {allPatients && allPatients.length > 1 ? (
               <select
                 className={inputCls}
+                name="selected-patient"
                 value={selectedPatId}
                 onChange={(e) => setSelectedPatId(e.target.value)}
               >
@@ -267,6 +271,7 @@ function LogVitalsModal({
             ) : (
               <input
                 disabled
+                name="patient-summary"
                 className={`${inputCls} bg-canvas font-semibold text-navy`}
                 value={`${patient.fullName} (${patient.uhid} - ${patient.clinicalCondition ? patient.clinicalCondition.slice(0, 32) : "General"} - ${patient.bloodGroup})`}
               />
@@ -276,13 +281,13 @@ function LogVitalsModal({
 
         {/* Date, Time, and Slot */}
         <Field label="Date *">
-          <input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} />
+          <input type="date" name="vitals-date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
         <Field label="Time">
-          <input type="text" placeholder="10:00 AM" className={inputCls} value={time} onChange={(e) => setTime(e.target.value)} />
+          <input type="text" name="vitals-time" placeholder="10:00 AM" className={inputCls} value={time} onChange={(e) => setTime(e.target.value)} />
         </Field>
         <Field label="Time Slot">
-          <select className={inputCls} value={timeSlot} onChange={(e) => setTimeSlot(e.target.value)}>
+          <select name="vitals-time-slot" className={inputCls} value={timeSlot} onChange={(e) => setTimeSlot(e.target.value)}>
             {TIME_SLOTS.map((s) => (
               <option key={s} value={s}>
                 {s}
@@ -298,7 +303,7 @@ function LogVitalsModal({
             step="0.1"
             placeholder="e.g. 9.2 (Ref: 11.5-17.5)"
             className={inputCls}
-            value={vitals.haemoglobin}
+            name="vitals-haemoglobin" value={vitals.haemoglobin}
             onChange={(e) => setField("haemoglobin", e.target.value)}
           />
         </Field>
@@ -309,7 +314,7 @@ function LogVitalsModal({
             step="1"
             placeholder="99"
             className={inputCls}
-            value={vitals.spO2}
+            name="vitals-spO2" value={vitals.spO2}
             onChange={(e) => setField("spO2", e.target.value)}
           />
         </Field>
@@ -320,7 +325,7 @@ function LogVitalsModal({
             step="1"
             placeholder="76"
             className={inputCls}
-            value={vitals.pulse}
+            name="vitals-pulse" value={vitals.pulse}
             onChange={(e) => setField("pulse", e.target.value)}
           />
         </Field>
@@ -332,7 +337,7 @@ function LogVitalsModal({
             step="1"
             placeholder="e.g. 98 (Ref: 70-100)"
             className={inputCls}
-            value={vitals.fastingGlucose}
+            name="vitals-fastingGlucose" value={vitals.fastingGlucose}
             onChange={(e) => setField("fastingGlucose", e.target.value)}
           />
         </Field>
@@ -343,7 +348,7 @@ function LogVitalsModal({
             step="1"
             placeholder="e.g. 142 (Ref: <140)"
             className={inputCls}
-            value={vitals.postPrandialGlucose}
+            name="vitals-postPrandialGlucose" value={vitals.postPrandialGlucose}
             onChange={(e) => setField("postPrandialGlucose", e.target.value)}
           />
         </Field>
@@ -354,7 +359,7 @@ function LogVitalsModal({
             step="0.1"
             placeholder="e.g. 6.8 (Ref: 4.0-5.6)"
             className={inputCls}
-            value={vitals.hbA1c}
+            name="vitals-hbA1c" value={vitals.hbA1c}
             onChange={(e) => setField("hbA1c", e.target.value)}
           />
         </Field>
@@ -366,7 +371,7 @@ function LogVitalsModal({
             step="1"
             placeholder="e.g. 120"
             className={inputCls}
-            value={vitals.bpSystolic}
+            name="vitals-bpSystolic" value={vitals.bpSystolic}
             onChange={(e) => setField("bpSystolic", e.target.value)}
           />
         </Field>
@@ -377,7 +382,7 @@ function LogVitalsModal({
             step="1"
             placeholder="e.g. 80"
             className={inputCls}
-            value={vitals.bpDiastolic}
+            name="vitals-bpDiastolic" value={vitals.bpDiastolic}
             onChange={(e) => setField("bpDiastolic", e.target.value)}
           />
         </Field>
@@ -388,7 +393,7 @@ function LogVitalsModal({
             step="1"
             placeholder="e.g. 1380 (Ref: 20-300)"
             className={inputCls}
-            value={vitals.serumFerritin}
+            name="vitals-serumFerritin" value={vitals.serumFerritin}
             onChange={(e) => setField("serumFerritin", e.target.value)}
           />
         </Field>
@@ -400,7 +405,7 @@ function LogVitalsModal({
               rows={3}
               placeholder="Clinical symptoms, treatment response, dietary tolerance, therapy notes..."
               className={inputCls}
-              value={vitals.clinicalNotes}
+              name="vitals-clinicalNotes" value={vitals.clinicalNotes}
               onChange={(e) => setField("clinicalNotes", e.target.value)}
             />
           </Field>
@@ -475,14 +480,14 @@ function DemographicsModal({
         <Field label="Full Name *">
           <input
             className={inputCls}
-            value={form.fullName}
+            name="patient-fullName" value={form.fullName}
             onChange={(e) => setForm((s) => ({ ...s, fullName: e.target.value }))}
           />
         </Field>
         <Field label="Contact Number *">
           <input
             className={inputCls}
-            value={form.contactNumber}
+            name="patient-contactNumber" value={form.contactNumber}
             onChange={(e) => setForm((s) => ({ ...s, contactNumber: e.target.value }))}
           />
         </Field>
@@ -492,14 +497,14 @@ function DemographicsModal({
             min={0}
             max={120}
             className={inputCls}
-            value={form.age}
+            name="patient-age" value={form.age}
             onChange={(e) => setForm((s) => ({ ...s, age: e.target.value }))}
           />
         </Field>
         <Field label="Gender">
           <select
             className={inputCls}
-            value={form.gender}
+            name="patient-gender" value={form.gender}
             onChange={(e) => setForm((s) => ({ ...s, gender: e.target.value as PatientDTO["gender"] }))}
           >
             <option value="MALE">Male</option>
@@ -510,7 +515,7 @@ function DemographicsModal({
         <Field label="Blood Group">
           <select
             className={inputCls}
-            value={form.bloodGroup}
+            name="patient-bloodGroup" value={form.bloodGroup}
             onChange={(e) => setForm((s) => ({ ...s, bloodGroup: e.target.value }))}
           >
             {BLOOD_GROUPS.map((b) => (
@@ -523,7 +528,7 @@ function DemographicsModal({
         <Field label="Diagnosis Category">
           <select
             className={inputCls}
-            value={form.categoryId}
+            name="patient-categoryId" value={form.categoryId}
             onChange={(e) => setForm((s) => ({ ...s, categoryId: e.target.value }))}
           >
             <option value="">— Unassigned —</option>
@@ -539,7 +544,7 @@ function DemographicsModal({
             <Field label="Room / Bed Number *">
               <input
                 className={inputCls}
-                value={form.roomBedNumber}
+                name="patient-roomBedNumber" value={form.roomBedNumber}
                 onChange={(e) => setForm((s) => ({ ...s, roomBedNumber: e.target.value }))}
               />
             </Field>
@@ -1011,6 +1016,7 @@ export default function PatientProfilePage() {
               >
                 <textarea
                   rows={4}
+                  name="clinical-condition"
                   className={inputCls}
                   value={condition}
                   onChange={(e) => setCondition(e.target.value)}
@@ -1034,7 +1040,8 @@ export default function PatientProfilePage() {
                   }
                 >
                   <select
-                    className={inputCls}
+                    name="diagnosis-category"
+                  className={inputCls}
                     value={selectedCat}
                     onChange={(e) => setSelectedCat(e.target.value)}
                   >
@@ -1138,7 +1145,8 @@ export default function PatientProfilePage() {
                   <Upload className="h-4 w-4" /> Upload Image File
                   <input
                     type="file"
-                    accept="image/*"
+                    name="consent-photo-file"
+                  accept="image/*"
                     className="hidden"
                     onChange={handleConsentPhotoUpload}
                   />
@@ -1197,7 +1205,8 @@ export default function PatientProfilePage() {
           <Field label="Discharge / Closing Summary Notes">
             <textarea
               rows={4}
-              className={inputCls}
+              name="discharge-notes"
+                  className={inputCls}
               placeholder="Clinical resolution notes, prescribed take-home medications, follow-up instructions..."
               value={dischargeNotes}
               onChange={(e) => setDischargeNotes(e.target.value)}

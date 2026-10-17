@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader, Card } from "@/components/portal/ui";
 import { usePortalData, LoadingCard, ErrorCard } from "./hooks";
+import { usePortalUser } from "./PortalLayout";
+import type { ModuleKey } from "@/lib/auth";
 
 type Dashboard = {
   stats: { patients: number; appointments: number; orders: number; products: number; dpdpPending: number };
@@ -10,6 +12,7 @@ type Dashboard = {
 };
 
 export default function DashboardPage() {
+  const { user } = usePortalUser();
   const { data, loading, error, reload } = usePortalData<Dashboard>("/api/portal/dashboard");
   useEffect(() => { document.title = "Dashboard | Rithanya HMS"; }, []);
 
@@ -17,16 +20,17 @@ export default function DashboardPage() {
   if (error || !data) return <ErrorCard error={error ?? "Could not load dashboard"} onRetry={reload} />;
 
   const stats = data.stats ?? { patients: 0, appointments: 0, orders: 0, products: 0, dpdpPending: 0 };
-  const appointments = data.recentAppointments ?? [];
-  const orders = data.recentOrders ?? [];
-
+  const can = (m: ModuleKey) => Boolean(user?.modules?.[m]);
+  // Only surface cards for modules this account can open — the links would 403.
   const cards: Array<[string, number, string]> = [
-    ["Patients (EMR)", stats.patients ?? 0, "/portal/outpatients"],
-    ["Appointments", stats.appointments ?? 0, "/portal/appointments"],
-    ["Store orders", stats.orders ?? 0, "/portal/store/orders"],
-    ["Products", stats.products ?? 0, "/portal/store/products"],
-    ["DPDP pending", stats.dpdpPending ?? 0, "/portal/compliance/dpdp-requests"],
+    ...(can("emr") ? [["Patients (EMR)", stats.patients ?? 0, "/portal/outpatients"] as [string, number, string]] : []),
+    ...(can("emr") ? [["Appointments", stats.appointments ?? 0, "/portal/appointments"] as [string, number, string]] : []),
+    ...(can("store") ? [["Store orders", stats.orders ?? 0, "/portal/store/orders"] as [string, number, string]] : []),
+    ...(can("store") ? [["Products", stats.products ?? 0, "/portal/store/products"] as [string, number, string]] : []),
+    ...(can("dpdp") ? [["DPDP pending", stats.dpdpPending ?? 0, "/portal/compliance/dpdp-requests"] as [string, number, string]] : []),
   ];
+  const appointments = can("emr") ? data.recentAppointments ?? [] : [];
+  const orders = can("store") ? data.recentOrders ?? [] : [];
 
   return (
     <>
