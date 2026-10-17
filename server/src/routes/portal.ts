@@ -169,11 +169,11 @@ router.delete("/media/purge", requireAuth("cms"), async (req, res) => {
 router.delete("/media/:id", requireAuth("cms"), async (req, res) => {
   const user = getUser(req);
   const assetId = param(req.params.id);
+  const raw = assetId.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
 
   if (isDbOnCooldown()) {
     // DB down: detach the asset from the in-memory picker so it stops showing,
     // and queue the authoritative DB delete for replay.
-    const raw = assetId.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
     for (const key of [assetId, raw, `media-${raw}`]) {
       const mem = inMemoryAssetStore.get(key);
       if (mem) {
@@ -190,8 +190,13 @@ router.delete("/media/:id", requireAuth("cms"), async (req, res) => {
 
   let asset;
   try {
+    // The API surface uses the FILENAME as the asset id (uploads, lists of
+    // disk-scanned files), while DB rows carry a uuid id — accept either.
     asset = await withDbTimeout(
-      prisma.mediaAsset.findUnique({ where: { id: assetId }, include: { links: true } }),
+      prisma.mediaAsset.findFirst({
+        where: { OR: [{ id: assetId }, { id: raw }, { filename: assetId }, { filename: raw }] },
+        include: { links: true },
+      }),
       DB_READ_MS,
     );
   } catch (err) {
@@ -259,9 +264,21 @@ async function runHandler(req: import("express").Request, res: import("express")
       res.status(e.status).json({ error: e.message });
       return;
     }
+    const err = e as { code?: string; status?: number; message?: string };
     // Prisma "record not found" on update/delete of a bogus id → clean 404, not 500.
-    if ((e as { code?: string })?.code === "P2025") {
+    if (err?.code === "P2025") {
       res.status(404).json({ error: "Not found" });
+      return;
+    }
+    // Modules flag HTTP semantics on their errors (e.g. users.ts sets 403/409).
+    const status = Number(err?.status);
+    if (Number.isInteger(status) && status >= 400 && status < 600) {
+      res.status(status).json({ error: err?.message || "Request failed" });
+      return;
+    }
+    // Plain lookups throw `new Error("… not found")` without a status code.
+    if (/not found/i.test(String(err?.message ?? ""))) {
+      res.status(404).json({ error: err?.message || "Not found" });
       return;
     }
     console.error(`[portal:r:${resource}]`, e);

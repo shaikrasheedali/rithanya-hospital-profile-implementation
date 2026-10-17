@@ -30,6 +30,12 @@
   "engines": {
     "node": ">=20"
   },
+  "overrides": {
+    "mariadb": "^3.5.4",
+    "@prisma/adapter-mariadb": {
+      "mariadb": "^3.5.4"
+    }
+  },
   "dependencies": {
     "@prisma/client": "^7.10.0",
     "mysql2": "^3.24.5"

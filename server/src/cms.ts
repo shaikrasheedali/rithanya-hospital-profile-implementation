@@ -323,6 +323,9 @@ async function persistWrite(
 export async function createItem(key: CollectionKey, body: Record<string, unknown>) {
   const def = COLLECTIONS[key];
   const mediaIds = cleanMediaIds(body.mediaIds);
+  // Creation mirrors the admin UI rule (and the update path): every CMS item
+  // must reference at least one image or video.
+  if (mediaIds.length === 0) return { error: "Add at least one image or video" };
   const res = coerce(def.fields, body, true);
   if ("error" in res && res.error) return { error: res.error };
   const data = (res as { data: Record<string, unknown> }).data;
@@ -356,7 +359,10 @@ export async function createItem(key: CollectionKey, body: Record<string, unknow
     };
     if (outboxHasPending("cms") === false && !isDbOnCooldown()) {
       try {
-        await withDbTimeout(insertRow(key, row), DB_WRITE_MS);
+        // Persist the SAME id the in-memory cache and media links use (the
+        // replay path and seed data do the same) — otherwise the DB row gets a
+        // random uuid and withMedia()/deleteItem() can never match its links.
+        await withDbTimeout(insertRow(key, { id: newId, ...row }), DB_WRITE_MS);
         reportDbSuccess();
         if (slug !== newItem.slug) {
           // DB adjusted our slug — mirror it in memory and media links.

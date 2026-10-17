@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import type { Request, Response, NextFunction } from "express";
 import { hash, verify } from "@node-rs/argon2";
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
+import { prisma, isDbOnCooldown, reportDbError, withDbTimeout, withDbRetry, DB_READ_MS, isTransientDbError } from "./db.js";
 
 export type Role = "SUPERADMIN" | "ADMIN" | "STAFF";
 export type ModuleKey = "emr" | "bloodbank" | "cms" | "store" | "hr" | "finance" | "dpdp" | "settings" | "access";
@@ -111,6 +111,22 @@ export function computeModules(role: Role, a?: AccessRow | null): Record<ModuleK
 export const userSessionCache = new Map<string, SessionUser>();
 
 /**
+ * Offline session resolution. users.ts registers a resolver that maps a user
+ * id to the last-known SessionUser from the encrypted users cache, so admin
+ * sessions keep working while the shared MySQL is briefly unreachable
+ * (cooldown / transient outage) instead of being signed out with a 401.
+ */
+type OfflineUserResolver = (id: string) => SessionUser | null;
+type OfflineUserRemember = (user: SessionUser, passwordHash?: string) => void;
+let offlineUserResolver: OfflineUserResolver | null = null;
+let offlineUserRemember: OfflineUserRemember | null = null;
+
+export function registerOfflineUserResolver(fn: OfflineUserResolver, remember?: OfflineUserRemember): void {
+  offlineUserResolver = fn;
+  offlineUserRemember = remember ?? null;
+}
+
+/**
  * Cache invalidation so permission/password changes take effect immediately.
  * Call after user updates (role change, deactivate, password reset, module
  * matrix change) and on logout. Passing no userId clears the whole cache.
@@ -126,9 +142,9 @@ export async function loadUser(userId: string): Promise<SessionUser | null> {
 
   if (!isDbOnCooldown()) {
     try {
-      const u = await prisma.user.findUnique({ where: { id: userId } });
+      const u = await withDbRetry(() => prisma.user.findUnique({ where: { id: userId } }), DB_READ_MS, 2);
       if (!u || !u.isActive) return null;
-      const a = await prisma.userModuleAccess.findUnique({ where: { userId: u.id } });
+      const a = await withDbTimeout(prisma.userModuleAccess.findUnique({ where: { userId: u.id } }), DB_READ_MS);
       const s: SessionUser = {
         id: u.id,
         username: u.username,
@@ -137,6 +153,7 @@ export async function loadUser(userId: string): Promise<SessionUser | null> {
         modules: computeModules(u.role as Role, a),
       };
       userSessionCache.set(userId, s);
+      offlineUserRemember?.(s, u.passwordHash);
       return s;
     } catch (err) {
       if (Date.now() - (loadUserWarnedAt ?? 0) > 30_000) {
@@ -144,9 +161,15 @@ export async function loadUser(userId: string): Promise<SessionUser | null> {
         console.warn("[auth] loadUser DB query failed:", err instanceof Error ? err.message : err);
       }
       reportDbError(err);
+      // Data-logic errors (e.g. record genuinely missing) end here; transient
+      // connectivity failures fall through to the offline cache below.
+      if (!isTransientDbError(err)) return null;
     }
   }
-  return null;
+
+  const offline = offlineUserResolver?.(userId) ?? null;
+  if (offline) userSessionCache.set(userId, offline);
+  return offline;
 }
 
 let loadUserWarnedAt = 0;

@@ -6,6 +6,7 @@ import {
   reportDbError,
   reportDbSuccess,
   withDbTimeout,
+  withDbRetry,
   DB_READ_MS,
   isTransientDbError,
 } from "../db.js";
@@ -20,6 +21,7 @@ import {
   sessionCookieOptions,
   loadUser,
 } from "../auth.js";
+import { findCachedUser, hasOfflineCredentials } from "../users.js";
 
 const router = Router();
 
@@ -70,19 +72,56 @@ router.post("/login", loginLimiter, async (req, res) => {
     return;
   }
 
-  if (isDbOnCooldown()) {
+  const busy = () =>
     res.status(503).json({ error: "Sign-in is temporarily unavailable (database busy). Please try again in a minute." });
-    return;
+
+  type DbAuthResult =
+    | { kind: "ok"; user: { id: string; username: string; fullName: string; role: string } }
+    | { kind: "bad" }
+    | { kind: "down" };
+
+  /** Authoritative check against MySQL; never throws. */
+  async function authenticateAgainstDb(): Promise<DbAuthResult> {
+    try {
+      const user = await withDbRetry(
+        () => prisma.user.findFirst({ where: { OR: [{ username: identity }, { email: identity }] } }),
+        DB_READ_MS,
+        2,
+        // Keep sign-in snappy when the database is down: cap the total DB
+        // budget, then authenticate from the encrypted offline cache.
+        9_000,
+      );
+      reportDbSuccess();
+      const ok = Boolean(user && user.isActive && (await verifyPassword(user.passwordHash, rawPw)));
+      return user && ok ? { kind: "ok", user } : { kind: "bad" };
+    } catch (err) {
+      const code = String((err as { code?: string } | undefined)?.code ?? "");
+      const msg = err instanceof Error ? err.message : String(err);
+      // A missing schema behaves like “database unavailable” for sign-in: the
+      // encrypted cache below can still authenticate built-in accounts.
+      if (isTransientDbError(err) || /P2021|P2010|does not exist|unknown table|no such table/i.test(`${code} ${msg}`)) {
+        if (isTransientDbError(err)) reportDbError(err);
+        console.warn("[auth/login] DB unavailable — trying encrypted user cache:", `${code} ${msg}`.slice(0, 160));
+        return { kind: "down" };
+      }
+      console.warn("[auth/login] DB query failed (data error):", `${code} ${msg}`.slice(0, 160));
+      return { kind: "bad" };
+    }
+  }
+
+  /** Offline check against the encrypted users cache (DB unreachable). */
+  async function authenticateOffline(): Promise<{ id: string; role: string } | null> {
+    const cached = findCachedUser(identity);
+    if (!cached || !cached.isActive || !cached.passwordHash) return null;
+    if (!(await verifyPassword(cached.passwordHash, rawPw))) return null;
+    return { id: cached.id, role: cached.role };
   }
 
   try {
-    const user = await withDbTimeout(
-      prisma.user.findFirst({ where: { OR: [{ username: identity }, { email: identity }] } }),
-      DB_READ_MS,
-    );
-    reportDbSuccess();
-    const ok = user && user.isActive && (await verifyPassword(user.passwordHash, rawPw));
-    if (user && ok) {
+    const result: DbAuthResult = isDbOnCooldown() ? { kind: "down" } : await authenticateAgainstDb();
+
+    if (result.kind === "ok") {
+      const user = result.user;
       failLimiter.delete(key);
       const token = await signSession(user.id, user.role as never);
       res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
@@ -92,17 +131,38 @@ router.post("/login", loginLimiter, async (req, res) => {
       return;
     }
 
+    if (result.kind === "down") {
+      // Database unreachable: authenticate from the last-known encrypted cache
+      // so the admin is never locked out by a temporary database hiccup.
+      const offline = await authenticateOffline();
+      if (offline) {
+        failLimiter.delete(key);
+        const token = await signSession(offline.id, offline.role as never);
+        res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
+        await loadUser(offline.id);
+        console.log(`[auth/login] Signed in ${identity} from the offline user cache (DB unavailable).`);
+        res.json({ ok: true, role: offline.role, offline: true });
+        return;
+      }
+      recordFailure(key, now);
+      if (!hasOfflineCredentials()) {
+        busy();
+        return;
+      }
+      // Same generic response as the online path — no user enumeration.
+      res.status(401).json({ error: "Invalid credentials" });
+      return;
+    }
+
+    // kind === "bad" — the database answered and rejected the credentials.
     recordFailure(key, now);
     // Generic message to avoid user enumeration.
     res.status(401).json({ error: "Invalid credentials" });
   } catch (err) {
-    if (isTransientDbError(err)) {
-      reportDbError(err);
-      console.warn("[auth/login] DB query failed:", err instanceof Error ? err.message : err);
-      res.status(503).json({ error: "Sign-in is temporarily unavailable (database busy). Please try again in a minute." });
-    } else {
-      res.status(401).json({ error: "Invalid credentials" });
-    }
+    // Safety net; authenticateAgainstDb already handles its own errors.
+    if (isTransientDbError(err)) reportDbError(err);
+    console.warn("[auth/login] Unexpected failure:", err instanceof Error ? err.message : err);
+    busy();
   }
 });
 

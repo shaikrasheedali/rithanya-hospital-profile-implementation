@@ -280,7 +280,7 @@ const bloodbank: Handler = {
     for (const s of stocks) {
       const g = oneOf(s.bloodGroup, CANONICAL_BLOOD_GROUPS, "blood group");
       const wb = num(s.wholeBloodUnits, "Whole blood units", { min: 0, max: 9999 })!;
-      const pc = num(s.packedCellsUnits, "Packed cells (PRBC) units", { min: 0, max: 9999 }) ?? 0;
+      const pc = num(s.packedCellsUnits, "Packed cells (PRBC) units", { min: 0, max: 9999, optional: true }) ?? 0;
       const pl = num(s.plasmaUnits, "Plasma units", { min: 0, max: 9999 })!;
       values.push({ bloodGroup: g, wholeBloodUnits: wb, packedCellsUnits: pc, plasmaUnits: pl });
     }

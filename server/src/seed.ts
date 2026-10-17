@@ -10,6 +10,7 @@ import {
   isTransientDbError,
 } from "./db.js";
 import { hashPassword, computeModules } from "./auth.js";
+import { ensureTables } from "./schemaBootstrap.js";
 import { setEntityMedia, registerAssetInMemory, type EntityType } from "./media.js";
 import { DEFAULT_SETTINGS } from "./settings.js";
 import { SEED_EMPLOYEES } from "./employees.js";
@@ -44,8 +45,29 @@ export function isTimeSlotColumnReady(): boolean {
 
 export async function ensureColumns(): Promise<void> {
   if (isDbOnCooldown()) return;
+  // Provision any missing tables first (managed MySQL on the hosting platform
+  // starts empty; this repo ships no migration files), then apply the
+  // additive column safety nets below to real tables.
+  await ensureTables();
+  if (isDbOnCooldown()) return;
   // VitalLog.timeSlot — persisted morning/afternoon/evening/night slot.
   await ensureColumn("vital_logs", "time_slot", "ALTER TABLE vital_logs ADD COLUMN time_slot VARCHAR(16) NULL");
+  // Additions from later releases, for databases provisioned by an earlier
+  // deploy: every statement is a no-op on fresh/current schemas (duplicate
+  // column is treated as success).
+  await ensureColumn("patients", "is_archived", "ALTER TABLE patients ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0");
+  await ensureColumn("orders", "is_paid", "ALTER TABLE orders ADD COLUMN is_paid TINYINT(1) NOT NULL DEFAULT 0");
+  await ensureColumn(
+    "employees",
+    "entity",
+    "ALTER TABLE employees ADD COLUMN entity VARCHAR(191) NOT NULL DEFAULT 'RITHANYA_HOSPITAL'",
+  );
+  await ensureColumn(
+    "payroll_records",
+    "authorizer_sign_svg",
+    "ALTER TABLE payroll_records ADD COLUMN authorizer_sign_svg MEDIUMTEXT NULL",
+  );
+  await ensureColumn("media_assets", "kind", "ALTER TABLE media_assets ADD COLUMN kind VARCHAR(191) NOT NULL DEFAULT 'IMAGE'");
 }
 
 async function ensureColumn(table: string, column: string, sql: string): Promise<void> {
@@ -229,8 +251,10 @@ async function seedCollection(entityKey: string, def: CollectionSeedDef, mediaMa
 
   // Non-empty: heal duplicate identity rows (legacy cuid twins).
   try {
+    // Order by id: every seed-managed model has a String id, while optional
+    // columns such as createdAt only exist on some models (blogPost has none).
     const rows = (await withDbTimeout(
-      delegate.findMany({ orderBy: { createdAt: "asc" } }),
+      delegate.findMany({ orderBy: { id: "asc" } }),
       DB_WRITE_MS,
     )) as Array<Record<string, any>>;
     const groups = new Map<string, Array<Record<string, any>>>();

@@ -5,6 +5,8 @@
 import assert from "node:assert";
 import { prisma, isDbOnCooldown } from "../src/db.js";
 import { ensureSeed } from "../src/seed.js";
+import { findCachedUser, hasOfflineCredentials } from "../src/users.js";
+import { loadUser, verifyPassword } from "../src/auth.js";
 import { getSettings } from "../src/settings.js";
 import { getBloodStock, getBlogs, getProducts, getDoctors } from "../src/content.js";
 import { listCollection, updateItem, getCollectionStore } from "../src/cms.js";
@@ -90,6 +92,25 @@ async function main() {
   assert.strictEqual(c.lopDeduction, 2000);
   assert.strictEqual(c.netPayable, 29500);
   console.log("[test] payroll OK");
+
+  // Offline sign-in regression (production incident: the shared MySQL was
+  // unreachable and every login attempt 503'd). The documented first-install
+  // credentials must authenticate from the encrypted users cache in BOTH
+  // modes — with a live database and with the database down.
+  assert.ok(hasOfflineCredentials(), "offline credentials available from the user cache");
+  const su = findCachedUser("superadmin");
+  assert.ok(su && su.passwordHash, "cached superadmin carries a password hash");
+  assert.ok(await verifyPassword(su!.passwordHash, "Hameed@2026"), "superadmin password verifies offline");
+  assert.ok(!(await verifyPassword(su!.passwordHash, "wrong-password")), "wrong password rejected offline");
+  const adm = findCachedUser("admin@rithanyahospital.com");
+  assert.ok(adm && (await verifyPassword(adm.passwordHash, "Rithanya@2026")), "admin email login verifies offline");
+  assert.strictEqual(findCachedUser("ghost-user"), undefined, "unknown identity not in the cache");
+  const suSession = await loadUser(su!.id);
+  assert.ok(
+    suSession && suSession.role === "SUPERADMIN" && suSession.modules.settings === true,
+    "session resolves from cache/DB with superadmin permissions",
+  );
+  console.log("[test] offline login OK");
 
   // DB invariants (when database is online)
   if (!isDbOnCooldown()) {

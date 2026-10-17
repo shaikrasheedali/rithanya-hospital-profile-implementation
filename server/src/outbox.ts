@@ -13,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { encryptJson, decryptJson } from "./crypto.js";
+import { isTransientDbError } from "./db.js";
 
 export type OutboxOp = {
   id: string;
@@ -176,8 +177,18 @@ export async function drainOutbox(): Promise<void> {
           persistQueue();
           continue;
         }
+        // Deterministic data error (validation, bad payload, …): replaying can
+        // never succeed. Drop it and KEEP draining — otherwise one poisoned op
+        // blocks every later write of its module (the module gate queues new
+        // writes) and the whole queue behind it until MAX_ATTEMPTS is reached.
+        if (!isTransientDbError(err)) {
+          dropFailed(op, msg.slice(0, 600));
+          state.ops.shift();
+          persistQueue();
+          continue;
+        }
         if (op.attempts >= MAX_ATTEMPTS) {
-          dropFailed(op, msg.slice(0, 200));
+          dropFailed(op, msg.slice(0, 600));
           state.ops.shift();
           persistQueue();
           continue;

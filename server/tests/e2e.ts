@@ -63,10 +63,13 @@ async function login(username: string, password: string): Promise<Jar> {
 }
 
 async function waitForHealth(child: ChildProcess): Promise<void> {
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 120; i++) {
     try {
       const r = await fetch(BASE + "/api/health");
-      if (r.ok) return;
+      if (r.ok) {
+        const j = (await r.json()) as { ready?: boolean };
+        if (j.ready === true) return;
+      }
     } catch { /* booting */ }
     await new Promise((r) => setTimeout(r, 500));
   }
@@ -208,7 +211,8 @@ async function main() {
       ok((await req("POST", "/api/portal/r/categories", { jar: sup, body: { name } })).status === 409, "category duplicate 409");
       ok((await req("POST", "/api/portal/r/categories", { jar: sup, body: {} })).status === 400, "category empty 400");
       ok((await req("PUT", `/api/portal/r/categories/${cid}`, { jar: sup, body: { name: name + " v2" } })).status === 200, "category update 200");
-      ok((await req("PUT", "/api/portal/r/categories/00000000-0000-0000-0000-000000000000", { jar: sup, body: { name: "z" } })).status === 404, "category update bogus 404");
+      const bogusCat = await req("PUT", "/api/portal/r/categories/00000000-0000-0000-0000-000000000000", { jar: sup, body: { name: "z" } });
+      ok(bogusCat.status === 404, "category update bogus 404", bogusCat.status);
       ok((await req("DELETE", `/api/portal/r/categories/${cid}`, { jar: sup })).status === 200, "category delete 200");
       const list = await req("GET", "/api/portal/r/categories", { jar: sup });
       ok(list.status === 200 && Array.isArray((list.json as { items: unknown[] }).items), "categories list 200");
@@ -346,11 +350,13 @@ async function main() {
       // linked asset cannot be deleted: link it via a temp specialty first
       const linked = await req("POST", "/api/portal/cms/specialties", { jar: sup, body: { title: `E2E Link ${Date.now()}`, shortSummary: "link probe", mediaIds: [asset.id] } });
       ok(linked.status === 200, "link asset via cms 200");
-      ok((await req("DELETE", `/api/portal/media/${asset.id}`, { jar: sup })).status === 409, "delete linked asset 409");
+      const delLinked = await req("DELETE", `/api/portal/media/${asset.id}`, { jar: sup });
+      ok(delLinked.status === 409, "delete linked asset 409", delLinked.status);
       const list2 = await req("GET", "/api/portal/cms/specialties", { jar: sup });
       const li = ((list2.json as { items: Array<{ id: string; title: string }> }).items ?? []).find((x) => x.title.startsWith("E2E Link"))!;
       await req("DELETE", `/api/portal/cms/specialties/${li.id}`, { jar: sup });
-      ok((await req("DELETE", `/api/portal/media/${asset.id}`, { jar: sup })).status === 200, "delete unlinked asset 200");
+      const delUnlinked = await req("DELETE", `/api/portal/media/${asset.id}`, { jar: sup });
+      ok(delUnlinked.status === 200, "delete unlinked asset 200", delUnlinked.status);
       ok((await req("DELETE", "/api/portal/media/00000000-0000-0000-0000-000000000000", { jar: sup })).status === 404, "delete media bogus 404");
       const emptyFd = new FormData();
       ok((await req("POST", "/api/portal/media", { jar: sup, form: emptyFd })).status === 400, "media no files 400");
@@ -399,7 +405,8 @@ async function main() {
       const eid = (created.json as { data: { id: string } }).data.id;
       ok((await req("POST", `/api/portal/r/employees/${eid}`, { jar: sup, body: { action: "toggle" } })).status === 200, "employee toggle 200");
       ok((await req("POST", "/api/portal/r/payroll", { jar: sup, body: { employeeId: eid, month: 13, year: 2026 } })).status === 400, "payroll bad month 400");
-      ok((await req("POST", "/api/portal/r/payroll", { jar: sup, body: { employeeId: "00000000-0000-0000-0000-000000000000", month: 5, year: 2026 } })).status === 404, "payroll bogus employee 404");
+      const bogusPayroll = await req("POST", "/api/portal/r/payroll", { jar: sup, body: { employeeId: "00000000-0000-0000-0000-000000000000", month: 5, year: 2026 } });
+      ok(bogusPayroll.status === 404, "payroll bogus employee 404", bogusPayroll.status);
       const pr = await req("POST", "/api/portal/r/payroll", { jar: sup, body: { employeeId: eid, month: 5, year: 2026, lopDays: 2, allowances: 2000, otherDeductions: 500 } });
       // May 2026 has 31 calendar days: per-day 30000/31, LOP 2d → 1935.48, net 30000−1935.48+2000−500 = 29564.52
       ok(pr.status === 200 && (pr.json as { data: { netPayable?: number } }).data?.netPayable === 29564.52, "payroll net 29564.52 (31-day month)", pr.text);
@@ -429,10 +436,12 @@ async function main() {
 
     /* ---------- portal: finance ---------- */
     {
-      const cat = await req("POST", "/api/portal/r/expense-categories", { jar: sup, body: { name: `E2E Fin ${Date.now()}` } });
+      const catName = `E2E Fin ${Date.now()}`;
+      const cat = await req("POST", "/api/portal/r/expense-categories", { jar: sup, body: { name: catName } });
       ok(cat.status === 200, "expense-category create 200", cat.text);
       const catId = (cat.json as { data: { id: string } }).data.id;
-      ok((await req("POST", "/api/portal/r/expense-categories", { jar: sup, body: { name: "Patient Billing" } })).status === 409, "expense-category duplicate 409");
+      const dupCat = await req("POST", "/api/portal/r/expense-categories", { jar: sup, body: { name: catName } });
+      ok(dupCat.status === 409, "expense-category duplicate 409", dupCat.status);
       const bad = await req("POST", "/api/portal/r/ledger", { jar: sup, body: { type: "DEBIT", itemName: "x", vendorPayee: "y", amount: 0, method: "Cash" } });
       ok(bad.status === 400, "ledger zero amount 400", bad.text);
       const le = await req("POST", "/api/portal/r/ledger", { jar: sup, body: { type: "DEBIT", itemName: "E2E supplies", vendorPayee: "E2E vendor", amount: 1250.5, method: "UPI", categoryId: catId } });

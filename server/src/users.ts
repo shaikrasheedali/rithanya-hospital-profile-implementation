@@ -7,6 +7,7 @@ import {
   reportDbError,
   reportDbSuccess,
   withDbTimeout,
+  withDbRetry,
   DB_READ_MS,
   DB_WRITE_MS,
   isTransientDbError,
@@ -15,6 +16,7 @@ import {
   computeModules,
   hashPassword,
   invalidateUserSession,
+  registerOfflineUserResolver,
   type ModuleKey,
   type Role,
   type SessionUser,
@@ -89,9 +91,19 @@ function loadCache(): StoredUser[] {
       }
       if (Array.isArray(parsed) && (parsed as StoredUser[]).length > 0) {
         // Purge legacy demo accounts; DB is the credential authority now.
-        return (parsed as StoredUser[]).filter(
+        const users = (parsed as StoredUser[]).filter(
           (u) => u.id !== "demo-staff" && u.username !== "staff",
         );
+        // Older cache files stripped password hashes (and older reads kept the
+        // built-in placeholder ids). Restore the documented first-install
+        // hashes so built-in accounts keep working while the DB is unreachable.
+        for (const u of users) {
+          if (!u.passwordHash) {
+            const initial = INITIAL_USERS.find((x) => x.id === u.id || x.username === u.username);
+            if (initial) u.passwordHash = initial.passwordHash;
+          }
+        }
+        return users;
       }
     }
   } catch (err) {
@@ -104,13 +116,25 @@ function persistCache(): void {
   try {
     const dir = path.dirname(CACHE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    // Encrypt the cache and strip password hashes — the DB is the credential
-    // authority and argon2 hashes must never sit in an offline readable file.
-    const withoutHashes = inMemoryUsers.map((u) => ({ ...u, passwordHash: "" }));
-    fs.writeFileSync(CACHE_FILE, encryptJson(withoutHashes), "utf-8");
+    // The cache file is AES-256-GCM encrypted at rest (see crypto.ts), so
+    // password hashes are deliberately kept: they allow the documented admin
+    // accounts to sign in while the shared database is briefly unreachable.
+    fs.writeFileSync(CACHE_FILE, encryptJson(inMemoryUsers), "utf-8");
   } catch (err) {
     console.warn("[users] Could not persist users cache file:", err);
   }
+}
+
+/** Case-insensitive lookup of a cached account for offline authentication. */
+export function findCachedUser(identity: string): StoredUser | undefined {
+  const id = identity.trim().toLowerCase();
+  if (!id) return undefined;
+  return inMemoryUsers.find((u) => u.username.toLowerCase() === id || u.email.toLowerCase() === id);
+}
+
+/** True when at least one active cached account can authenticate offline. */
+export function hasOfflineCredentials(): boolean {
+  return inMemoryUsers.some((u) => u.isActive && Boolean(u.passwordHash));
 }
 
 export function canActorManageUser(actor: SessionUser, targetRole: Role, targetId?: string): boolean {
@@ -130,23 +154,29 @@ export function canActorManageUser(actor: SessionUser, targetRole: Role, targetI
 export async function loadUsersList(actor?: SessionUser): Promise<Array<{ id: string; username: string; email: string; fullName: string; role: Role; isActive: boolean }>> {
   if (!isDbOnCooldown()) {
     try {
-      const dbUsers = await withDbTimeout(
-        prisma.user.findMany({
-          orderBy: { createdAt: "asc" },
-        }),
-        DB_READ_MS
-      );
+      const [dbUsers, accessRows] = await Promise.all([
+        withDbRetry(() => prisma.user.findMany({ orderBy: { createdAt: "asc" } }), DB_READ_MS, 2),
+        withDbRetry(() => prisma.userModuleAccess.findMany(), DB_READ_MS, 2),
+      ]);
       reportDbSuccess();
+      const accessByUser = new Map(accessRows.map((a) => [a.userId, a]));
 
       for (const u of dbUsers) {
-        // Skip any legacy staff from DB if not desired
+        const access = accessByUser.get(u.id) ?? null;
         const idx = inMemoryUsers.findIndex((x) => x.id === u.id || x.username === u.username);
         if (idx >= 0) {
-          inMemoryUsers[idx].fullName = u.fullName;
-          inMemoryUsers[idx].email = u.email;
-          inMemoryUsers[idx].role = u.role as Role;
-          inMemoryUsers[idx].isActive = u.isActive;
-          inMemoryUsers[idx].passwordHash = u.passwordHash;
+          // The DB is the authority once reachable: adopt its id (replacing the
+          // built-in placeholder ids), credentials and profile. Cached custom
+          // permission matrices are kept unless the DB has an access row.
+          const entry = inMemoryUsers[idx];
+          entry.id = u.id;
+          entry.username = u.username;
+          entry.fullName = u.fullName;
+          entry.email = u.email;
+          entry.role = u.role as Role;
+          entry.isActive = u.isActive;
+          entry.passwordHash = u.passwordHash;
+          if (access) entry.modules = computeModules(u.role as Role, access);
         } else {
           inMemoryUsers.push({
             id: u.id,
@@ -159,7 +189,7 @@ export async function loadUsersList(actor?: SessionUser): Promise<Array<{ id: st
             createdById: u.createdById,
             createdAt: u.createdAt.toISOString(),
             updatedAt: u.updatedAt.toISOString(),
-            modules: computeModules(u.role as Role),
+            modules: computeModules(u.role as Role, access),
           });
         }
       }
@@ -392,6 +422,29 @@ async function persistUserWrite(
     enqueueOutbox(op);
   }
 }
+
+// Offline session resolution: while the shared MySQL is unreachable (cooldown
+// or transient outage) sessions resolve from the encrypted users cache instead
+// of 401-ing the admin out. When a DB load succeeds, the cache is refreshed so
+// offline sign-in always compares against the latest known credentials.
+registerOfflineUserResolver(
+  (id) => {
+    const u = inMemoryUsers.find((x) => x.id === id);
+    if (!u || !u.isActive) return null;
+    return { id: u.id, username: u.username, fullName: u.fullName, role: u.role, modules: u.modules };
+  },
+  (session, passwordHash) => {
+    const entry = inMemoryUsers.find((x) => x.id === session.id || x.username === session.username);
+    if (!entry) return;
+    entry.id = session.id; // adopt the DB id when it differs from a placeholder
+    entry.username = session.username;
+    entry.fullName = session.fullName;
+    entry.role = session.role;
+    entry.modules = session.modules;
+    if (passwordHash) entry.passwordHash = passwordHash;
+    persistCache();
+  },
+);
 
 registerOutboxExecutor("users", async (op) => {
   if (op.action === "create") {

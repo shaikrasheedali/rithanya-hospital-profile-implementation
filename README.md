@@ -46,7 +46,26 @@ When deploying on GoDaddy Node.js hosting, database secrets are injected automat
 - `DB_USER`
 - `DB_PASSWORD`
 
-The server automatically maps these into the database connection string and utilizes Prisma driver adapters (`mariadb` adapter for MySQL/MariaDB). Writes are durable: when the database is briefly unreachable, operations are queued in an encrypted on-disk outbox (`server/uploads/outbox.json`) and replayed automatically after reconnection — admin edits are permanent until changed again.
+The server maps these into the Prisma `mariadb` driver adapter (or into a `DATABASE_URL` when only that variable exists — both are supported). **The app provisions its own schema at boot**: every table is created with idempotent `CREATE TABLE IF NOT EXISTS` statements (`server/src/schemaBootstrap.ts`) and first-install seed accounts/content are created only when missing — no `prisma migrate deploy` step is required on the host, and existing data is never modified or dropped.
+
+### Resilience on shared hosting
+
+- **Sign-in works while the database is briefly unavailable.** The users cache (`server/uploads/users-cache.json`, AES-256-GCM encrypted) keeps the last-known password hashes, so the documented admin accounts can always sign in; portal reads fall back to the same encrypted caches and admin writes are queued in the durable outbox (`server/uploads/outbox.json`) and replayed automatically on reconnect.
+- **MySQL 8's `caching_sha2_password` works on the very first connection** — public-key retrieval is enabled, so a fresh deploy or a database restart (when the server's fast-auth cache is empty) can authenticate immediately instead of failing with `ER_CANNOT_RETRIEVE_RSA_KEY`.
+- **Transient database failures are retried** (`withDbRetry`) before anything is reported, pooled connections are recycled every 10s so a shared server that closes idle connections cannot poison the pool, and warm-up/cooldown handshake problems self-heal.
+- `GET /api/health` always returns 200 while the app is serving and reports `db.connected` plus the sanitized failure reason — the deployment dashboard logs also show `[db] Target …`, the connectivity probe result and cooldown reasons.
+
+Optional environment overrides (sensible defaults, normally not needed):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DB_SOCKET` | – | Unix socket path (only used when explicitly set) |
+| `DB_SSL` | off | `true` encrypts the MySQL connection (certificate checking via `DB_SSL_VERIFY=true`) |
+| `DB_POOL_LIMIT` | `5` | Pool connection limit (shared hosting friendly) |
+| `DB_CONNECT_TIMEOUT_MS` | `15000` | Per-connection connect timeout |
+| `DB_ACQUIRE_TIMEOUT_MS` | `15000` | Pool acquire timeout |
+| `DB_IDLE_TIMEOUT_MS` | `10000` | Idle connection recycling |
+| `DB_READ_TIMEOUT_MS` / `DB_WRITE_TIMEOUT_MS` | `8000` / `15000` | App-level query budgets |
 
 ## Login accounts (seeded on first install)
 
