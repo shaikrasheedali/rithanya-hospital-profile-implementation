@@ -444,6 +444,11 @@ registerOfflineUserResolver(
     if (passwordHash) entry.passwordHash = passwordHash;
     persistCache();
   },
+  (id) => {
+    // Reconcile hint: resolve a placeholder-id session to the DB row by key.
+    const u = inMemoryUsers.find((x) => x.id === id);
+    return u ? { username: u.username, email: u.email } : null;
+  },
 );
 
 registerOutboxExecutor("users", async (op) => {

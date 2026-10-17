@@ -118,12 +118,21 @@ export const userSessionCache = new Map<string, SessionUser>();
  */
 type OfflineUserResolver = (id: string) => SessionUser | null;
 type OfflineUserRemember = (user: SessionUser, passwordHash?: string) => void;
+/** Maps a cached (possibly placeholder) session id to the identity keys of the
+ *  account, so an id-miss can be reconciled against the authoritative DB row. */
+type OfflineUserReconcile = (id: string) => { username: string; email: string } | null;
 let offlineUserResolver: OfflineUserResolver | null = null;
 let offlineUserRemember: OfflineUserRemember | null = null;
+let offlineUserReconcile: OfflineUserReconcile | null = null;
 
-export function registerOfflineUserResolver(fn: OfflineUserResolver, remember?: OfflineUserRemember): void {
+export function registerOfflineUserResolver(
+  fn: OfflineUserResolver,
+  remember?: OfflineUserRemember,
+  reconcile?: OfflineUserReconcile,
+): void {
   offlineUserResolver = fn;
   offlineUserRemember = remember ?? null;
+  offlineUserReconcile = reconcile ?? null;
 }
 
 /**
@@ -142,7 +151,22 @@ export async function loadUser(userId: string): Promise<SessionUser | null> {
 
   if (!isDbOnCooldown()) {
     try {
-      const u = await withDbRetry(() => prisma.user.findUnique({ where: { id: userId } }), DB_READ_MS, 2);
+      let u = await withDbRetry(() => prisma.user.findUnique({ where: { id: userId } }), DB_READ_MS, 2);
+      if (!u) {
+        // Sessions minted from the users cache (built-in first-install accounts,
+        // or sign-ins that happened while the DB was unreachable) can carry
+        // placeholder ids. Reconcile them against the authoritative DB row by
+        // username/email so those sessions survive the reconnect. A genuinely
+        // deleted account still resolves to null — never resurrect it.
+        const hint = offlineUserReconcile?.(userId);
+        if (hint) {
+          u = await withDbRetry(
+            () => prisma.user.findFirst({ where: { OR: [{ username: hint.username }, { email: hint.email }] } }),
+            DB_READ_MS,
+            2,
+          );
+        }
+      }
       if (!u || !u.isActive) return null;
       const a = await withDbTimeout(prisma.userModuleAccess.findUnique({ where: { userId: u.id } }), DB_READ_MS);
       const s: SessionUser = {
@@ -153,6 +177,9 @@ export async function loadUser(userId: string): Promise<SessionUser | null> {
         modules: computeModules(u.role as Role, a),
       };
       userSessionCache.set(userId, s);
+      // Also key the resolution under the DB id so permission/password
+      // invalidations (which use DB ids) always find and clear it.
+      if (s.id !== userId) userSessionCache.set(s.id, s);
       offlineUserRemember?.(s, u.passwordHash);
       return s;
     } catch (err) {

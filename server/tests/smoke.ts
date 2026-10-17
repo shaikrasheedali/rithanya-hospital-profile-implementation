@@ -42,17 +42,18 @@ async function main() {
   console.log("[test] doctors OK");
 
   // Admin-edit durability regression (the historical "admin edits wiped/reverted
-  // to defaults" bug): the CMS store must keep exactly the canonical items with
-  // no duplicates, and an admin edit must stick (memory now, DB when reachable).
+  // to defaults" bug): the CMS store must keep the canonical items (plus any
+  // admin-created ones when the DB is online) with no duplicates, and an admin
+  // edit must stick (memory now, DB when reachable).
   const specialties = await listCollection("specialties");
   const specIds = specialties.map((i) => i.id as string);
-  assert.strictEqual(specialties.length, FALLBACK_SPECIALTIES.length, `specialties count (got ${specialties.length})`);
+  assert.ok(specialties.length >= FALLBACK_SPECIALTIES.length, `specialties count (got ${specialties.length})`);
   assert.strictEqual(new Set(specIds).size, specIds.length, `no duplicate specialty ids (${specIds.join(",")})`);
   for (const f of FALLBACK_SPECIALTIES) {
     assert.ok(specIds.includes(f.id), `canonical specialty ${f.id} present`);
   }
   const store = getCollectionStore("specialties");
-  assert.strictEqual(store.size, FALLBACK_SPECIALTIES.length, "store mirrors collection size");
+  assert.strictEqual(store.size, specialties.length, "store mirrors collection size");
   const edited = specialties[0]!;
   const originalSummary = edited.shortSummary as string;
   const SmokeSummary = `smoke-edit-${Date.now()}`;

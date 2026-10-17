@@ -76,30 +76,25 @@ export default function AboutPage() {
           <SectionHeading
             eyebrow="Press & Community"
             title="Recognized across Khammam & Telangana"
-            desc="Featured in leading regional publications for humanitarian thalassemia daycare camps and voluntary blood donation drives."
+            desc="Featured in leading Telugu dailies for community health camps and free health-centre initiatives across Khammam district."
             center
           />
-          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {[
               {
-                title: "Eenadu Daily",
-                desc: "Coverage of free blood transfusion camp & thalassemia awareness initiative.",
-                src: "/seed/rithanya-hospital-khammam-newspaper-eenadu-thalassemia-transfusion-camp.webp",
+                title: "Eenadu Daily — 15 Mar 2023",
+                desc: "Free health camp for children in Khammam, covered in the Eenadu Khammam edition (page 02).",
+                src: "/seed/rithanya-hospital-khammam-eenadu-newspaper-clipping-2023.webp",
               },
               {
-                title: "Surya Daily",
-                desc: "World Thalassemia Day special event & humanitarian recognition in Khammam.",
-                src: "/seed/rithanya-hospital-khammam-newspaper-surya-world-thalassemia-day.webp",
+                title: "Surya Daily — 27 Apr 2024",
+                desc: "Cheque handover for a health centre in Khammam district, reported by Surya (page 10).",
+                src: "/seed/rithanya-hospital-khammam-surya-newspaper-clipping-2024.webp",
               },
               {
-                title: "Bhadrachalam Camp",
-                desc: "Mobile outreach & comprehensive blood transfusion support for tribal agency regions.",
-                src: "/seed/rithanya-hospital-khammam-newspaper-bhadrachalam-camp-blood-transfusion.webp",
-              },
-              {
-                title: "District Health Drive",
-                desc: "Community blood donation drives with local administration & rotary organizations.",
-                src: "/seed/rithanya-hospital-khammam-newspaper-district-blood-donation-awareness.webp",
+                title: "Bhadrachalam Press Coverage",
+                desc: "Telugu daily coverage of the cheque handover for a new free health centre in Bhadrachalam, Khammam district.",
+                src: "/seed/rithanya-hospital-khammam-telugu-newspaper-clipping-bhadrachalam.webp",
               },
             ].map((item) => (
               <Reveal key={item.title}>
