@@ -128,7 +128,7 @@ const TABLE_DDL: string[] = [
     \`serum_ferritin\` DOUBLE NULL,
     \`clinical_notes\` TEXT NULL,
     \`recorded_by_staff\` VARCHAR(191) NULL,
-    \`time_slot\` VARCHAR(16) NULL,
+    \`time_slot\` VARCHAR(191) NULL,
     PRIMARY KEY (\`id\`),
     KEY \`vital_logs_patient_id_recorded_at_idx\` (\`patient_id\`, \`recorded_at\`),
     CONSTRAINT \`vital_logs_patient_id_fkey\` FOREIGN KEY (\`patient_id\`) REFERENCES \`patients\`(\`id\`) ON DELETE CASCADE ON UPDATE CASCADE
@@ -490,6 +490,16 @@ const TABLE_DDL: string[] = [
 const g = globalThis as typeof globalThis & { __rhTablesReady?: boolean };
 
 /**
+ * Idempotent column fixes for tables created by older releases
+ * (`ALTER ... MODIFY` is a metadata no-op when the definition already matches).
+ */
+const COLUMN_FIXES: string[] = [
+  // Early releases created `vital_logs.time_slot` as VARCHAR(16) while Prisma
+  // expects VARCHAR(191) — any longer value failed with P2000.
+  "ALTER TABLE `vital_logs` MODIFY `time_slot` VARCHAR(191) NULL",
+];
+
+/**
  * Idempotently create every table the application needs. Runs at boot (via
  * ensureSeed) and is safe to call repeatedly; a failure never crashes the
  * process — features continue on caches/outbox and the remaining statements
@@ -520,6 +530,17 @@ export async function ensureTables(): Promise<void> {
         );
         break;
       }
+      if (isDbOnCooldown()) break;
+    }
+  }
+
+  for (const ddl of COLUMN_FIXES) {
+    try {
+      await withDbRetry(() => prisma.$executeRawUnsafe(ddl), DB_WRITE_MS, 1);
+      reportDbSuccess();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[schema] Column fix skipped: ${msg.slice(0, 140)}`);
       if (isDbOnCooldown()) break;
     }
   }

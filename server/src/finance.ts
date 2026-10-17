@@ -40,6 +40,20 @@ export type ExpenseLedgerDTO = {
 
 const CACHE_FILE = path.resolve(process.cwd(), "uploads", "finance-cache.json");
 
+/**
+ * Calendar year/month for a timestamp in Asia/Kolkata (IST = UTC+5:30, no DST).
+ * `entryDate` values are stored as UTC ISO strings while the hospital's books
+ * are kept in IST — host-local getFullYear()/getMonth() mis-buckets entries
+ * made late in the evening near month boundaries (and can delete the wrong
+ * month). All month derivation goes through this helper.
+ */
+export function istYearMonth(value: Date | string): { year: number; month: number } | null {
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return null;
+  const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
+  return { year: ist.getUTCFullYear(), month: ist.getUTCMonth() + 1 };
+}
+
 export const SEED_CATEGORIES: ExpenseCategoryDTO[] = [
   {
     id: "cat-pharmacy-supplies",
@@ -151,17 +165,18 @@ function ensurePayrollCategoryExists(): void {
 }
 
 export async function pruneOldLedgerEntries(): Promise<void> {
-  const now = new Date();
-  const currentTotalMonths = now.getFullYear() * 12 + (now.getMonth() + 1);
+  const now = istYearMonth(new Date());
+  if (!now) return;
+  const currentTotalMonths = now.year * 12 + now.month;
   const cutoffTotalMonths = currentTotalMonths - 12;
 
   const originalCount = inMemoryFinance.ledger.length;
   const prunedIds: string[] = [];
 
   inMemoryFinance.ledger = inMemoryFinance.ledger.filter((entry) => {
-    const d = new Date(entry.entryDate);
-    if (isNaN(d.getTime())) return true;
-    const entryTotalMonths = d.getFullYear() * 12 + (d.getMonth() + 1);
+    const ym = istYearMonth(entry.entryDate);
+    if (!ym) return true;
+    const entryTotalMonths = ym.year * 12 + ym.month;
     if (entryTotalMonths < cutoffTotalMonths) {
       prunedIds.push(entry.id);
       return false;
@@ -172,18 +187,16 @@ export async function pruneOldLedgerEntries(): Promise<void> {
   if (inMemoryFinance.ledger.length !== originalCount) {
     persistCache();
     console.log(`[finance] 12-Month retention pruned ${originalCount - inMemoryFinance.ledger.length} old ledger entries`);
-    if (!isDbOnCooldown() && prunedIds.length > 0) {
+    if (prunedIds.length > 0) {
+      // Durable: goes straight to the DB when healthy, otherwise replays from
+      // the outbox — the prune can never silently resurrect on next boot.
       try {
-        await withDbTimeout(
-          prisma.expenseLedger.deleteMany({
-            where: { id: { in: prunedIds } },
-          }),
-          DB_WRITE_MS,
+        await persistFinanceWrite(
+          { module: "finance", action: "ledger.deleteMany", payload: { ids: prunedIds } },
+          () => prisma.expenseLedger.deleteMany({ where: { id: { in: prunedIds } } }),
         );
-        reportDbSuccess();
-        wakeOutbox();
       } catch (err) {
-        if (isTransientDbError(err)) reportDbError(err);
+        console.warn("[finance] Could not queue pruned-entry cleanup:", (err as Error)?.message || err);
       }
     }
   }
@@ -238,8 +251,8 @@ function persistCache(): void {
 async function persistFinanceWrite(
   op: {
     module: "finance";
-    action: "category.create" | "category.update" | "category.delete" | "ledger.create" | "ledger.update" | "ledger.delete";
-    key: string;
+    action: "category.create" | "category.update" | "category.delete" | "ledger.create" | "ledger.update" | "ledger.delete" | "ledger.deleteMany";
+    key?: string;
     payload: unknown;
   },
   run: () => Promise<unknown>,
@@ -253,9 +266,18 @@ async function persistFinanceWrite(
     reportDbSuccess();
     wakeOutbox();
   } catch (err) {
-    if (isTransientDbError(err)) reportDbError(err);
-    console.warn(`[finance] DB write failed (${op.action}) — queued for durable retry:`, (err as Error)?.message || err);
-    enqueueOutbox(op);
+    if (isTransientDbError(err)) {
+      reportDbError(err);
+      console.warn(`[finance] DB write failed (${op.action}) — queued for durable retry:`, (err as Error)?.message || err);
+      enqueueOutbox(op);
+      return;
+    }
+    // Deterministic data error — replaying can never succeed, so enqueueing
+    // would silently lose the change. Surface it instead.
+    console.warn(`[finance] ${op.action} data error:`, (err as Error)?.message || err);
+    const e = new Error("The change could not be saved — please review the values and try again.") as Error & { status?: number };
+    e.status = 422;
+    throw e;
   }
 }
 
@@ -286,6 +308,13 @@ registerOutboxExecutor("finance", async (op) => {
     case "ledger.delete": {
       const p = op.payload as { id: string };
       await prisma.expenseLedger.delete({ where: { id: p.id } });
+      break;
+    }
+    case "ledger.deleteMany": {
+      const p = op.payload as { ids: string[] };
+      if (Array.isArray(p.ids) && p.ids.length > 0) {
+        await prisma.expenseLedger.deleteMany({ where: { id: { in: p.ids } } });
+      }
       break;
     }
   }
@@ -450,11 +479,9 @@ export async function deleteMonthLedgerEntries(
 
   inMemoryFinance.ledger = inMemoryFinance.ledger.filter((entry) => {
     if (entry.entity !== targetEntity) return true;
-    const d = new Date(entry.entryDate);
-    if (isNaN(d.getTime())) return true;
-    const entryYear = d.getFullYear();
-    const entryMonth = d.getMonth() + 1;
-    if (entryYear === year && entryMonth === month) {
+    const ym = istYearMonth(entry.entryDate);
+    if (!ym) return true;
+    if (ym.year === year && ym.month === month) {
       removedIds.push(entry.id);
       return false;
     }
@@ -463,19 +490,13 @@ export async function deleteMonthLedgerEntries(
 
   persistCache();
 
-  if (!isDbOnCooldown() && removedIds.length > 0) {
-    try {
-      await withDbTimeout(
-        prisma.expenseLedger.deleteMany({
-          where: { id: { in: removedIds } },
-        }),
-        DB_WRITE_MS,
-      );
-      reportDbSuccess();
-      wakeOutbox();
-    } catch (err) {
-      if (isTransientDbError(err)) reportDbError(err);
-    }
+  if (removedIds.length > 0) {
+    // Durable: direct DB write when healthy, outbox replay otherwise — the
+    // month can never come back after a reload/restart.
+    await persistFinanceWrite(
+      { module: "finance", action: "ledger.deleteMany", payload: { ids: removedIds } },
+      () => prisma.expenseLedger.deleteMany({ where: { id: { in: removedIds } } }),
+    );
   }
 
   return { count: removedIds.length };

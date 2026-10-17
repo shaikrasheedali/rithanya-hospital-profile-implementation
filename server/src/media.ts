@@ -32,6 +32,48 @@ export const UPLOAD_ROOT = resolveUploadRoot();
 export const IMAGE_DIR = path.join(UPLOAD_ROOT, "optimized");
 export const VIDEO_DIR = path.join(UPLOAD_ROOT, "videos");
 export const PRIVATE_DIR = path.join(UPLOAD_ROOT, "private");
+/** Cache dir for portal grid thumbnails (generated on demand, gitignored). */
+export const THUMB_DIR = path.join(IMAGE_DIR, "thumbs");
+
+/** Best-effort removal of cached thumbnails for a deleted asset. */
+export async function removeAssetThumbs(filename: string): Promise<void> {
+  const base = path.basename(filename, path.extname(filename));
+  try {
+    const entries = await fs.readdir(THUMB_DIR);
+    await Promise.all(
+      entries
+        .filter((e) => e.endsWith(`-${base}.webp`))
+        .map((e) => fs.unlink(path.join(THUMB_DIR, e)).catch(() => undefined)),
+    );
+  } catch {
+    // thumbs dir absent — nothing to clean
+  }
+}
+
+/**
+ * Remove a file, tolerating the brief Windows locks antivirus/streams place on
+ * freshly-read files (EBUSY/EPERM/EACCES) with short retries, and scheduling a
+ * final deferred retry instead of failing the request — the DB row is already
+ * gone, so a leftover file must not surface as a 500.
+ */
+async function rmFileWithRetry(file: string, attempts = 5): Promise<void> {
+  for (let i = 0; ; i++) {
+    try {
+      await fs.rm(file, { force: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const transient = code === "EBUSY" || code === "EPERM" || code === "EACCES";
+      if (!transient) throw err;
+      if (i >= attempts) {
+        console.warn(`[media] ${path.basename(file)} is still locked (${code}) — retrying removal in 5s`);
+        setTimeout(() => { fs.rm(file, { force: true }).catch(() => undefined); }, 5000);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 120 * (i + 1)));
+    }
+  }
+}
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 120 * 1024 * 1024;
@@ -188,11 +230,31 @@ export async function saveUploadFile(file: UploadedFile): Promise<MediaAssetReco
   const hashPart = crypto.createHash("sha256").update(buf).digest("hex").slice(0, 16);
 
   if (file.mimetype.startsWith("image/")) {
-    const processed = await sharp(buf)
-      .rotate()
-      .resize({ width: 2560, height: 2560, fit: "inside", withoutEnlargement: true })
-      .webp({ quality: 82, effort: 2, alphaQuality: 85 })
-      .toBuffer();
+    // Fast path: an already-WebP image that fits our size envelope and carries
+    // no EXIF metadata can be stored untouched — skips a full re-encode.
+    let passthrough = false;
+    if (file.mimetype === "image/webp") {
+      try {
+        const meta = await sharp(buf, { failOn: "error" }).metadata();
+        passthrough =
+          (meta.width ?? 0) > 0 &&
+          (meta.width ?? 0) <= 2560 &&
+          (meta.height ?? 0) <= 2560 &&
+          !meta.exif &&
+          !meta.orientation;
+      } catch {
+        passthrough = false;
+      }
+    }
+    const processed = passthrough
+      ? buf
+      : await sharp(buf)
+          .rotate()
+          .resize({ width: 2560, height: 2560, fit: "inside", withoutEnlargement: true, fastShrinkOnLoad: true })
+          // effort 1 (vs 2) is ~20-30% faster to encode at visually identical
+          // quality — the biggest single-file processing win on shared hosting.
+          .webp({ quality: 82, effort: 1, alphaQuality: 85 })
+          .toBuffer();
     if (processed.length > MAX_BYTES) throw new Error("Processed image exceeds the strict 10MB threshold.");
     const filename = `${Date.now()}-${hashPart}.webp`;
     await fs.mkdir(IMAGE_DIR, { recursive: true });
@@ -374,8 +436,11 @@ export async function deleteAssetFile(asset: { filename: string; url: string }) 
   inMemoryAssetStore.delete(asset.filename);
   if (!asset.url.startsWith("/api/media/")) return;
   for (const dir of [IMAGE_DIR, VIDEO_DIR]) {
-    await fs.rm(path.join(dir, asset.filename), { force: true });
+    await rmFileWithRetry(path.join(dir, asset.filename));
+    await rmFileWithRetry(path.join(dir, asset.filename).replace(/\.webp$/, ""));
   }
+  // Cached thumbnails are regenerated on demand — drop the stale copies.
+  await removeAssetThumbs(asset.filename).catch(() => undefined);
 }
 
 export const cover = (media: MediaRef[] | undefined): MediaRef | undefined =>

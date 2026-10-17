@@ -375,6 +375,24 @@ export function getInMemoryPatients(): PatientDTO[] {
   return inMemoryPatients;
 }
 
+/**
+ * Drops patients (matched by id or UHID) from the in-memory cache and the
+ * encrypted on-disk cache. Used by DPDP erasure — without this the erased
+ * records keep being served from memory after the DB rows are deleted.
+ */
+export function prunePatientsFromMemory(ids: string[]): void {
+  const wanted = new Set(ids);
+  let changed = false;
+  for (let i = inMemoryPatients.length - 1; i >= 0; i--) {
+    const p = inMemoryPatients[i];
+    if (wanted.has(p.id) || wanted.has(p.uhid)) {
+      inMemoryPatients.splice(i, 1);
+      changed = true;
+    }
+  }
+  if (changed) persistCache();
+}
+
 export async function loadPatients(opts: {
   type?: "INPATIENT" | "OUTPATIENT";
   discharged: boolean;
@@ -529,7 +547,16 @@ export async function getPatientById(id: string): Promise<PatientDTO | null> {
         persistCache();
         return mapped;
       }
+      // The database answered and holds no such patient — an authoritative
+      // miss (e.g. a DPDP-erased record). Drop any stale in-memory copy and
+      // never fall back to memory in this case.
+      const staleIdx = inMemoryPatients.findIndex((x) => x.id === id || x.uhid === id);
+      if (staleIdx >= 0) {
+        inMemoryPatients.splice(staleIdx, 1);
+        persistCache();
+      }
       reportDbSuccess();
+      return null;
     } catch (err) {
       if (isTransientDbError(err)) reportDbError(err);
     }

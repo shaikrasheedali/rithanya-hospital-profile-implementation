@@ -1,4 +1,5 @@
 import { Router } from "express";
+import crypto from "node:crypto";
 import rateLimit from "express-rate-limit";
 import {
   prisma,
@@ -32,6 +33,16 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// First-run bootstrap is unauthenticated by design (it only succeeds while no
+// users exist) — a tight limiter keeps it from being abused for probing or
+// race hammering.
+const bootstrapLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 /** Per identity+IP failure tracking with hard lockout and bounded memory. */
 const failLimiter = new Map<string, { n: number; first: number }>();
 const FAIL_WINDOW_MS = 10 * 60 * 1000;
@@ -61,8 +72,17 @@ router.post("/login", loginLimiter, async (req, res) => {
     return;
   }
 
-  // Bootstrap password must never be accepted as a real credential.
-  const identity = ident === "rithanya@2026" || ident === "hameed@2026" ? "" : ident;
+  // Legacy bootstrap passwords must never be accepted as credentials. This
+  // previously compared the *username* and silently mangled the lookup
+  // identity — it now checks the supplied password (case-sensitive: the real
+  // seeded passwords, e.g. Hameed@2026, remain valid so existing installs
+  // aren't locked out; rotate them from the portal when convenient).
+  if (rawPw === "rithanya@2026" || rawPw === "hameed@2026") {
+    res.status(401).json({ error: "Invalid credentials" });
+    return;
+  }
+
+  const identity = ident;
 
   const key = `${req.ip}:${identity}`;
   const now = Date.now();
@@ -80,6 +100,17 @@ router.post("/login", loginLimiter, async (req, res) => {
     | { kind: "bad" }
     | { kind: "down" };
 
+  /**
+   * Argon2 verification is the dominant cost of a login attempt; skipping it
+   * for unknown/inactive accounts leaks their existence via response time.
+   * This dummy verify keeps the timing uniform for every failure path.
+   */
+  let dummyHashPromise: Promise<string> | null = null;
+  const dummyVerify = (pw: string): Promise<boolean> => {
+    dummyHashPromise ??= hashPassword(crypto.randomUUID());
+    return dummyHashPromise.then((h) => verifyPassword(h, pw)).catch(() => false);
+  };
+
   /** Authoritative check against MySQL; never throws. */
   async function authenticateAgainstDb(): Promise<DbAuthResult> {
     try {
@@ -92,8 +123,12 @@ router.post("/login", loginLimiter, async (req, res) => {
         9_000,
       );
       reportDbSuccess();
-      const ok = Boolean(user && user.isActive && (await verifyPassword(user.passwordHash, rawPw)));
-      return user && ok ? { kind: "ok", user } : { kind: "bad" };
+      if (!user || !user.isActive || !user.passwordHash) {
+        await dummyVerify(rawPw);
+        return { kind: "bad" };
+      }
+      const ok = await verifyPassword(user.passwordHash, rawPw);
+      return ok ? { kind: "ok", user } : { kind: "bad" };
     } catch (err) {
       const code = String((err as { code?: string } | undefined)?.code ?? "");
       const msg = err instanceof Error ? err.message : String(err);
@@ -112,7 +147,10 @@ router.post("/login", loginLimiter, async (req, res) => {
   /** Offline check against the encrypted users cache (DB unreachable). */
   async function authenticateOffline(): Promise<{ id: string; role: string } | null> {
     const cached = findCachedUser(identity);
-    if (!cached || !cached.isActive || !cached.passwordHash) return null;
+    if (!cached || !cached.isActive || !cached.passwordHash) {
+      await dummyVerify(rawPw);
+      return null;
+    }
     if (!(await verifyPassword(cached.passwordHash, rawPw))) return null;
     return { id: cached.id, role: cached.role };
   }
@@ -187,7 +225,7 @@ router.get("/me", async (req, res) => {
 });
 
 // Ensure a superadmin exists even if seed was skipped (first-run bootstrap)
-router.post("/bootstrap", async (req, res) => {
+router.post("/bootstrap", bootstrapLimiter, async (req, res) => {
   try {
     const count = await withDbTimeout(prisma.user.count(), DB_READ_MS);
     if (count > 0) {
@@ -207,28 +245,40 @@ router.post("/bootstrap", async (req, res) => {
     res.status(400).json({ error: "Password must be at least 8 characters" });
     return;
   }
-  const u = await prisma.user.create({
-    data: {
-      username: "superadmin",
-      email: "superadmin@rithanyahospital.com",
-      fullName: "Hospital Superadmin",
-      role: "SUPERADMIN",
-      passwordHash: await hashPassword(password),
-    },
-  });
-  await prisma.userModuleAccess.create({
-    data: {
-      userId: u.id,
-      canManageEMR: true,
-      canManageBloodBank: true,
-      canManageCMS: true,
-      canManageStore: true,
-      canManageHR: true,
-      canManageFinance: true,
-      canManageDPDP: true,
-      canManageSettings: true,
-    },
-  });
+  try {
+    const u = await prisma.user.create({
+      data: {
+        username: "superadmin",
+        email: "superadmin@rithanyahospital.com",
+        fullName: "Hospital Superadmin",
+        role: "SUPERADMIN",
+        passwordHash: await hashPassword(password),
+      },
+    });
+    await prisma.userModuleAccess.create({
+      data: {
+        userId: u.id,
+        canManageEMR: true,
+        canManageBloodBank: true,
+        canManageCMS: true,
+        canManageStore: true,
+        canManageHR: true,
+        canManageFinance: true,
+        canManageDPDP: true,
+        canManageSettings: true,
+      },
+    });
+  } catch (err) {
+    // Concurrent bootstrap calls race on the unique username — report the
+    // same "already initialized" result instead of surfacing a 500.
+    const code = String((err as { code?: string } | undefined)?.code ?? "");
+    const msg = err instanceof Error ? err.message : "";
+    if (code === "P2002" || /P2002|unique constraint/i.test(msg)) {
+      res.status(403).json({ error: "Already initialized" });
+      return;
+    }
+    throw err;
+  }
   res.json({ ok: true, username: "superadmin" });
 });
 

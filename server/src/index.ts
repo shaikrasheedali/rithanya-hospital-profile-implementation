@@ -3,10 +3,12 @@ import express from "express";
 import path from "node:path";
 import fs from "node:fs";
 import cookieParser from "cookie-parser";
+import compression from "compression";
 import helmet from "helmet";
 import morgan from "morgan";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
+import { upload, MAX_UPLOAD_MB } from "./upload.js";
 import { prisma, withDbTimeout, withDbRetry, getDbConfig, dbDiagnostics, dbFailureReason, reportDbError, reportDbSuccess, isTransientDbError } from "./db.js";
 import { ensureBaseData, ensureSeed, ensureColumns } from "./seed.js";
 import { loadOutbox, startOutboxTimer, wakeOutbox, outboxPendingCount } from "./outbox.js";
@@ -24,20 +26,65 @@ const PORT = Number(process.env.PORT ?? 4000);
 const bootState = { ready: false };
 
 app.disable("x-powered-by");
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
-app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+// Full CSP: locked down to same-origin by default, with explicit allowances
+// for the three external integrations the site actually uses —
+// Google Fonts (styles + font files), Google Maps embeds, gallery embeds
+// (YouTube/Facebook/Instagram/Vimeo) and — only for visitors who opt into
+// translation — the Google Translate widget domains.
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        "default-src": ["'self'"],
+        "script-src": ["'self'", "https://translate.google.com", "https://translate.googleapis.com", "https://www.gstatic.com"],
+        "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://www.gstatic.com", "https://translate.googleapis.com"],
+        "font-src": ["'self'", "data:", "https://fonts.gstatic.com", "https://translate.googleapis.com"],
+        "img-src": ["'self'", "data:", "blob:", "https://*.gstatic.com", "https://translate.googleapis.com", "https://translate.google.com"],
+        "media-src": ["'self'", "blob:"],
+        "connect-src": ["'self'", "https://translate.googleapis.com", "https://translate.google.com", "https://translate-pa.googleapis.com"],
+        "frame-src": [
+          "'self'",
+          "https://www.google.com",
+          "https://www.youtube.com",
+          "https://www.youtube-nocookie.com",
+          "https://www.facebook.com",
+          "https://web.facebook.com",
+          "https://www.instagram.com",
+          "https://player.vimeo.com",
+          "https://translate.google.com",
+          "https://*.translate.goog",
+        ],
+        "worker-src": ["'self'", "blob:"],
+        "object-src": ["'none'"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
+        "frame-ancestors": ["'self'"],
+        "upgrade-insecure-requests": [],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  }),
+);
+// gzip/deflate for all compressible responses (HTML, JS, CSS, JSON) — big
+// transfer-time win on shared hosting; skips images/videos/ranges by default.
+app.use(compression());
+// Access logs must never capture DPDP tracking query strings (they carry the
+// requester's phone number) — for that one route only the path is logged.
+morgan.token("safe-url", (req) => {
+  const raw = String((req as { originalUrl?: string | null }).originalUrl ?? req.url ?? "");
+  const pathOnly = raw.split("?")[0];
+  return pathOnly.startsWith("/api/public/dpdp") ? pathOnly : raw;
+});
+app.use(
+  morgan(
+    process.env.NODE_ENV === "production"
+      ? ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'
+      : ":method :safe-url :status :res[content-length] - :response-time ms",
+  ),
+);
 app.use(cookieParser());
 app.use(express.json({ limit: "12mb" }));
 app.use(express.urlencoded({ extended: true }));
-
-// Media + DPDP proof uploads are stored in memory and written straight to
-// disk/DB; 120MB per file accommodates raw video takes without rejecting the
-// clinic's existing library re-uploads.
-const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB ?? "120");
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024, files: 10 },
-});
 
 // ---------- API ----------
 // The app is designed to keep serving (caches + durable outbox) while the
@@ -79,7 +126,8 @@ app.use("/api/public/orders", publicWriteLimiter);
 app.use("/api/public/dpdp", publicWriteLimiter);
 
 app.use("/api/auth", authRoutes);
-// DPDP proof upload needs multer single-file parsing
+// DPDP proof upload needs multer single-file parsing (runs after the public
+// write rate limiter above; the route itself validates the payload).
 app.use("/api/public", (req, res, next) => {
   if (req.path === "/dpdp" && req.method === "POST") {
     upload.single("identityProof")(req, res, next);
@@ -87,7 +135,6 @@ app.use("/api/public", (req, res, next) => {
   }
   next();
 }, publicRoutes);
-app.use("/api/portal/media", upload.array("files", 10));
 app.use("/api/portal", portalRoutes);
 
 // ---------- Public media files (uploaded images/videos) ----------
@@ -121,6 +168,9 @@ for (const c of candidates) {
 }
 if (frontendDir) {
   console.log(`[static] Serving frontend from ${frontendDir}`);
+  // Vite output filenames are content-hashed — safe to cache immutably for a
+  // year; this removes the revalidation round-trip on every navigation.
+  app.use("/assets", express.static(path.join(frontendDir, "assets"), { maxAge: "1y", immutable: true, index: false }));
   app.use(express.static(frontendDir, { maxAge: "1h", index: false }));
   // SPA fallback: everything that is not /api/* returns index.html (app.use works in Express 4 & 5)
   app.use((req, res, next) => {

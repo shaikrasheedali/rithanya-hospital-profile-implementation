@@ -1,7 +1,9 @@
 import { Router } from "express";
 import path from "node:path";
 import fs from "node:fs";
-import { IMAGE_DIR, VIDEO_DIR } from "../media.js";
+import fsp from "node:fs/promises";
+import sharp from "sharp";
+import { IMAGE_DIR, VIDEO_DIR, THUMB_DIR } from "../media.js";
 
 const mediaRouter = Router();
 
@@ -39,6 +41,70 @@ export function getSeedDir(): string | null {
     }
   }
   return null;
+}
+
+// ---------- Thumbnails ----------
+// Portal grids request square tiles via `?thumb=<px>`. Generating (and caching)
+// a small WebP avoids shipping a 1-5MB original per tile — a media library page
+// with ~50 assets drops from tens of MB to well under 1MB of transfers.
+const THUMB_MIN = 32;
+const THUMB_MAX = 1024;
+const THUMB_DEFAULT = 320;
+const THUMB_MAX_CONCURRENCY = 4;
+
+const thumbInflight = new Map<string, Promise<string>>();
+let thumbActive = 0;
+const thumbQueue: Array<() => void> = [];
+
+function acquireThumbSlot(): Promise<void> {
+  if (thumbActive < THUMB_MAX_CONCURRENCY) {
+    thumbActive += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => thumbQueue.push(() => { thumbActive += 1; resolve(); }));
+}
+
+function releaseThumbSlot(): void {
+  thumbActive -= 1;
+  const next = thumbQueue.shift();
+  if (next) next();
+}
+
+export function parseThumbSize(raw: unknown): number {
+  const n = Number(Array.isArray(raw) ? raw[0] : raw);
+  if (!Number.isFinite(n) || n <= 0) return THUMB_DEFAULT;
+  return Math.min(THUMB_MAX, Math.max(THUMB_MIN, Math.round(n)));
+}
+
+/** Returns the cached thumbnail path, generating it on first use. */
+async function ensureThumb(srcPath: string, size: number): Promise<string> {
+  const base = path.basename(srcPath, path.extname(srcPath));
+  const dest = path.join(THUMB_DIR, `t${size}-${base}.webp`);
+  try {
+    const st = await fsp.stat(dest);
+    if (st.isFile() && st.size > 0) return dest;
+  } catch {
+    // not cached yet
+  }
+  const running = thumbInflight.get(dest);
+  if (running) return running;
+  const job = (async () => {
+    await acquireThumbSlot();
+    try {
+      await fsp.mkdir(THUMB_DIR, { recursive: true });
+      await sharp(srcPath)
+        .rotate()
+        .resize({ width: size, height: size, fit: "inside", withoutEnlargement: true })
+        .webp({ quality: 76, effort: 1 })
+        .toFile(dest);
+      return dest;
+    } finally {
+      releaseThumbSlot();
+      thumbInflight.delete(dest);
+    }
+  })();
+  thumbInflight.set(dest, job);
+  return job;
 }
 
 export function resolveMediaFilePath(rawName: string): { fullPath: string; mime: string; ext: string } | null {
@@ -116,7 +182,31 @@ mediaRouter.get("/:filename", (req, res) => {
     return;
   }
 
-  const { fullPath, mime } = resolved;
+  const { fullPath, mime, ext } = resolved;
+
+  // Thumbnail fast path for image tiles (`/api/media/<name>?thumb=320`).
+  if (req.query.thumb !== undefined && mime.startsWith("image/") && ext !== ".gif") {
+    const size = parseThumbSize(req.query.thumb);
+    ensureThumb(fullPath, size)
+      .then((thumbPath) => {
+        const st = fs.statSync(thumbPath);
+        res.setHeader("Content-Type", "image/webp");
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        res.setHeader("Content-Length", String(st.size));
+        fs.createReadStream(thumbPath).pipe(res);
+      })
+      .catch(() => {
+        // Thumbnail generation failed (corrupt source?) — fall back to the
+        // original file below instead of erroring the tile.
+        sendFullFile(req, res, fullPath, mime);
+      });
+    return;
+  }
+
+  sendFullFile(req, res, fullPath, mime);
+});
+
+function sendFullFile(req: import("express").Request, res: import("express").Response, fullPath: string, mime: string): void {
   const stat = fs.statSync(fullPath);
   const range = req.headers.range;
 
@@ -146,6 +236,6 @@ mediaRouter.get("/:filename", (req, res) => {
   res.setHeader("Content-Type", mime);
   res.setHeader("Content-Length", String(stat.size));
   fs.createReadStream(fullPath).pipe(res);
-});
+}
 
 export default mediaRouter;

@@ -197,12 +197,22 @@ router.post("/appointments", async (req, res) => {
     res.status(400).json({ error: "Please enter a valid phone number" });
     return;
   }
+  // Preferred date is a calendar day in the hospital's timezone (IST). Reject
+  // past dates server-side too — the client clock/timezone can't be trusted.
+  const preferredDateStr = String(preferredDate ?? "").slice(0, 40);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(preferredDateStr)) {
+    const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    if (preferredDateStr < todayIST) {
+      res.status(400).json({ error: "Preferred date cannot be in the past." });
+      return;
+    }
+  }
   const src = ["CONTACT", "THALASSEMIA"].includes(String(source)) ? String(source) : "WEBSITE";
   const data = {
     fullName: name.slice(0, 120),
     phone: ph.slice(0, 30),
-    department: String(department ?? "").slice(0, 200),
-    preferredDate: String(preferredDate ?? "").slice(0, 40),
+    department: String(department ?? "").slice(0, 191),
+    preferredDate: preferredDateStr,
     message: String(message ?? "").slice(0, 1500),
     source: src,
   };

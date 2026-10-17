@@ -13,6 +13,7 @@ import {
 } from "./db.js";
 import { getCollectionStore } from "./cms.js";
 import { phoneDigits } from "./utils.js";
+import { encryptJson, decryptJson } from "./crypto.js";
 import { enqueueOutbox, outboxHasPending, registerOutboxExecutor, wakeOutbox } from "./outbox.js";
 
 export type OrderItemDTO = {
@@ -46,8 +47,14 @@ function loadCache(): OrderDTO[] {
   try {
     if (fs.existsSync(CACHE_FILE)) {
       const raw = fs.readFileSync(CACHE_FILE, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (raw.trim()) {
+        // Encrypted cache (current format). decryptJson passes plaintext
+        // through unchanged, so files written by older releases (plain
+        // JSON.stringify) are still read here — they get re-encrypted on the
+        // next persistCache().
+        const parsed = decryptJson<unknown>(raw, null);
+        if (Array.isArray(parsed)) return parsed as OrderDTO[];
+      }
     }
   } catch (err) {
     console.warn("[orders] Could not read orders cache file:", err);
@@ -59,7 +66,9 @@ function persistCache(): void {
   try {
     const dir = path.dirname(CACHE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(inMemoryOrders, null, 2), "utf-8");
+    // Customer PII (name/phone/address) — keep the cache encrypted at rest
+    // like every sibling cache.
+    fs.writeFileSync(CACHE_FILE, encryptJson(inMemoryOrders), "utf-8");
   } catch (err) {
     console.warn("[orders] Could not persist orders cache file:", err);
   }
@@ -144,10 +153,17 @@ export async function createOrder(data: {
   let subtotal = 0;
   const lines: OrderItemDTO[] = [];
 
+  // Aggregate duplicate lines first: validating each line against the same
+  // non-decremented stock let two "qty 20" lines of a 20-unit product pass.
+  const wanted = new Map<string, number>();
   for (const it of data.items) {
     const qty = Math.trunc(Number(it.quantity ?? it.qty ?? 1));
     if (!Number.isFinite(qty) || qty < 1 || qty > 20) throw new Error("Invalid quantity");
     const pid = String(it.productId ?? it.id ?? "");
+    wanted.set(pid, (wanted.get(pid) ?? 0) + qty);
+  }
+  for (const [pid, qty] of wanted) {
+    if (qty > 20) throw new Error("Invalid quantity — at most 20 units per product");
     const prod = productStore.get(pid);
     if (!prod) throw new Error("A product in your cart is no longer available");
     const stockUnits = Number(prod.stockUnits ?? 0);
@@ -162,14 +178,6 @@ export async function createOrder(data: {
       quantity: qty,
       unitPrice,
     });
-  }
-
-  // Decrement in-memory stock immediately
-  for (const l of lines) {
-    const prod = productStore.get(l.productId);
-    if (prod) {
-      prod.stockUnits = Math.max(0, Number(prod.stockUnits ?? 0) - l.quantity);
-    }
   }
 
   const delivery = subtotal >= 500 ? 0 : 40;
@@ -193,7 +201,7 @@ export async function createOrder(data: {
   const newOrder: OrderDTO = {
     id: orderId,
     orderNumber,
-    customerName: customerName.slice(0, 200),
+    customerName: customerName.slice(0, 191),
     phoneNumber: phoneNumber.slice(0, 30),
     shippingAddress: shippingAddress.slice(0, 1000),
     pinCode,
@@ -205,11 +213,10 @@ export async function createOrder(data: {
     items: lines,
   };
 
-  inMemoryOrders.unshift(newOrder);
-  persistCache();
-
-  // Awaited DB write; on failure the order (with stock deltas) is queued in the
-  // durable outbox and replayed when the DB recovers.
+  // Awaited DB write; on transient failure the order (with stock deltas) is
+  // queued in the durable outbox and replayed when the DB recovers. A
+  // deterministic rejection (e.g. stock changed by a concurrent order) leaves
+  // the in-memory caches untouched and propagates to the customer.
   const op = {
     module: "orders",
     action: "create",
@@ -230,17 +237,38 @@ export async function createOrder(data: {
       items: lines,
     },
   };
+  // Apply to memory only once the persistence path is decided — a deterministic
+  // DB rejection must leave the caches untouched (the DB is the arbiter of
+  // stock and the customer needs to see the failure).
+  const applyToMemory = () => {
+    for (const l of lines) {
+      const prod = productStore.get(l.productId);
+      if (prod) prod.stockUnits = Math.max(0, Number(prod.stockUnits ?? 0) - l.quantity);
+    }
+    inMemoryOrders.unshift(newOrder);
+    persistCache();
+  };
+
   if (outboxHasPending("orders") || isDbOnCooldown()) {
     enqueueOutbox(op);
+    applyToMemory();
   } else {
     try {
       await withDbTimeout(applyOrderCreation(op.payload as any), DB_WRITE_MS);
       reportDbSuccess();
       wakeOutbox();
+      applyToMemory();
     } catch (err) {
-      if (isTransientDbError(err)) reportDbError(err);
-      console.warn("[orders] DB write failed — order queued for durable retry:", (err as Error)?.message || err);
-      enqueueOutbox(op);
+      if (isTransientDbError(err)) {
+        reportDbError(err);
+        console.warn("[orders] DB write failed — order queued for durable retry:", (err as Error)?.message || err);
+        enqueueOutbox(op);
+        applyToMemory();
+      } else {
+        // Deterministic rejection (stock vanished, constraint failure): tell
+        // the customer instead of queueing an order that can never persist.
+        throw err;
+      }
     }
   }
 
@@ -278,10 +306,15 @@ async function applyOrderCreation(payload: {
           unitPrice: l.unitPrice,
         },
       });
-      await tx.product.update({
-        where: { id: l.productId },
+      // Conditional decrement: stock can never go negative even if a
+      // concurrent order (or a stale cache) slipped past validation.
+      const dec = await tx.product.updateMany({
+        where: { id: l.productId, stockUnits: { gte: l.quantity } },
         data: { stockUnits: { decrement: l.quantity } },
       });
+      if (dec.count === 0) {
+        throw new Error(`Only limited stock remains for ${l.productName} — please refresh your cart`);
+      }
     }
   });
 }

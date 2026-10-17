@@ -312,11 +312,17 @@ async function persistWrite(
     if (isTransientDbError(err)) {
       reportDbError(err);
       enqueueOutbox(op);
-    } else {
-      // Data-logic error (e.g. unique slug on replayed insert) — surface it.
-      console.warn(`[cms] persistWrite ${op.action}/${op.key} data error:`, (err as Error)?.message ?? err);
-      enqueueOutbox(op);
+      return;
     }
+    // Deterministic data error (bad value, unique conflict, row vanished, …):
+    // replaying can never succeed, so enqueueing would silently lose the edit.
+    // Surface it instead — the admin sees the failure and fixes the data.
+    // The in-memory cache self-heals on the next list read (it refreshes from
+    // the DB whenever no CMS writes are pending).
+    console.warn(`[cms] persistWrite ${op.action}/${op.key} data error:`, (err as Error)?.message ?? err);
+    const e = new Error("The change could not be saved — please review the values and try again.") as Error & { status?: number };
+    e.status = 422;
+    throw e;
   }
 }
 

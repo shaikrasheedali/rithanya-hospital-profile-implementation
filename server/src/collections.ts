@@ -55,7 +55,7 @@ export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
     subtitleField: "shortSummary",
     mediaHelp: "First image becomes the facility cover. Add more images or videos for facility details.",
     fields: [
-      { name: "title", label: "Facility name", type: "text", required: true },
+      { name: "title", label: "Facility name", type: "text", required: true, max: 191 },
       { name: "shortSummary", label: "Short summary", type: "textarea", required: true, max: 500 },
       { name: "contentHtml", label: "Detailed overview", type: "richtext" },
       sortOrder,
@@ -71,7 +71,7 @@ export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
     subtitleField: "shortSummary",
     mediaHelp: "First image becomes the cover. Add more images or videos for the detail page gallery.",
     fields: [
-      { name: "title", label: "Specialty title", type: "text", required: true },
+      { name: "title", label: "Specialty title", type: "text", required: true, max: 191 },
       { name: "shortSummary", label: "Short summary", type: "textarea", required: true, max: 500 },
       { name: "contentHtml", label: "Detailed content", type: "richtext" },
       sortOrder,
@@ -87,7 +87,7 @@ export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
     subtitleField: "shortSummary",
     mediaHelp: "Showcase imagery or videos of the treatment pathway.",
     fields: [
-      { name: "title", label: "Treatment title", type: "text", required: true },
+      { name: "title", label: "Treatment title", type: "text", required: true, max: 191 },
       {
         name: "category",
         label: "Category",
@@ -111,7 +111,7 @@ export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
     subtitleField: "shortSummary",
     mediaHelp: "Photos or videos of the facility or service.",
     fields: [
-      { name: "title", label: "Service title", type: "text", required: true },
+      { name: "title", label: "Service title", type: "text", required: true, max: 191 },
       {
         name: "category",
         label: "Service type",
@@ -134,12 +134,12 @@ export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
     subtitleField: "designation",
     mediaHelp: "Portrait photo first. Extra images or videos (clinic, camps, intro video) are optional.",
     fields: [
-      { name: "fullName", label: "Full name", type: "text", required: true },
+      { name: "fullName", label: "Full name", type: "text", required: true, max: 191 },
       { name: "qualifications", label: "Qualifications", type: "text", required: true, half: true },
-      { name: "designation", label: "Designation", type: "text", required: true, half: true },
-      { name: "department", label: "Department", type: "text", required: true, half: true },
+      { name: "designation", label: "Designation", type: "text", required: true, half: true, max: 191 },
+      { name: "department", label: "Department", type: "text", required: true, half: true, max: 191 },
       { name: "experienceYears", label: "Years of experience", type: "number", half: true },
-      { name: "consultationTimings", label: "Consultation timings", type: "text" },
+      { name: "consultationTimings", label: "Consultation timings", type: "text", max: 191 },
       { name: "isVisiting", label: "Visiting faculty", type: "checkbox", half: true },
       sortOrder,
       { name: "biographyHtml", label: "Biography", type: "richtext" },
@@ -154,7 +154,7 @@ export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
     subtitleField: "schemeType",
     mediaHelp: "Provider logo or scheme artwork.",
     fields: [
-      { name: "name", label: "Provider / scheme name", type: "text", required: true },
+      { name: "name", label: "Provider / scheme name", type: "text", required: true, max: 191 },
       {
         name: "schemeType",
         label: "Scheme type",
@@ -176,7 +176,7 @@ export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
     subtitleField: "caption",
     mediaHelp: "Images or self-hosted videos shown in the gallery. For social embeds, attach a cover image that is shown as the thumbnail.",
     fields: [
-      { name: "title", label: "Title", type: "text", required: true },
+      { name: "title", label: "Title", type: "text", required: true, max: 191 },
       {
         name: "mediaType",
         label: "Gallery type",
@@ -204,7 +204,7 @@ export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
     subtitleField: "excerpt",
     mediaHelp: "First image is the cover. You can add more images or videos to illustrate the article.",
     fields: [
-      { name: "title", label: "Article title", type: "text", required: true },
+      { name: "title", label: "Article title", type: "text", required: true, max: 191 },
       {
         name: "category",
         label: "Category",
@@ -212,7 +212,7 @@ export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
         half: true,
         options: ["Diabetes Management", "Blood Disorders", "Maternal Health", "General Wellness"],
       },
-      { name: "authorName", label: "Author", type: "text", half: true },
+      { name: "authorName", label: "Author", type: "text", half: true, max: 191 },
       { name: "isPublished", label: "Published", type: "checkbox", half: true },
       { name: "excerpt", label: "Excerpt", type: "textarea", required: true, max: 600 },
       { name: "contentHtml", label: "Article body", type: "richtext" },
@@ -227,9 +227,9 @@ export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
     subtitleField: "quote",
     mediaHelp: "Patient photo (with consent) or a thank-you video.",
     fields: [
-      { name: "patientName", label: "Patient / family name", type: "text", required: true, half: true },
-      { name: "location", label: "Location", type: "text", half: true },
-      { name: "treatment", label: "Treatment received", type: "text", half: true },
+      { name: "patientName", label: "Patient / family name", type: "text", required: true, half: true, max: 191 },
+      { name: "location", label: "Location", type: "text", half: true, max: 191 },
+      { name: "treatment", label: "Treatment received", type: "text", half: true, max: 191 },
       { name: "rating", label: "Rating (1-5)", type: "number", half: true },
       { name: "quote", label: "Testimonial", type: "textarea", required: true },
       sortOrder,
@@ -245,7 +245,7 @@ export const COLLECTIONS: Record<CollectionKey, CollectionDef> = {
     subtitleField: "category",
     mediaHelp: "Product photos or demo videos. The first image is used on the storefront card.",
     fields: [
-      { name: "name", label: "Product name", type: "text", required: true },
+      { name: "name", label: "Product name", type: "text", required: true, max: 191 },
       {
         name: "category",
         label: "Category",

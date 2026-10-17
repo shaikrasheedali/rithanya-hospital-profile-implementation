@@ -21,6 +21,8 @@ export type OutboxOp = {
   at: string;
   /** replay attempts made so far */
   attempts: number;
+  /** earliest time (epoch ms) the next replay may run (transient backoff) */
+  nextAttemptAt?: number;
   /** logical owner, e.g. "cms" | "media" | "users" | "employees" | "orders" | "payroll" | "finance" | "emr" | "appointments" | "settings" */
   module: string;
   /** module-specific action name, e.g. "create" | "upsert" | "delete" */
@@ -41,7 +43,9 @@ const state = g.__rhOutbox;
 const OUTBOX_FILE = path.resolve(process.cwd(), "uploads", "outbox.json");
 const OUTBOX_FAILED_FILE = path.resolve(process.cwd(), "uploads", "outbox-failed.log");
 const MAX_OPS = 2000;
-const MAX_ATTEMPTS = 50;
+/** Transient failures retry forever with exponential backoff (never dropped). */
+const BACKOFF_BASE_MS = 5_000;
+const BACKOFF_CAP_MS = 30 * 60 * 1000;
 
 export type ReplayExecutor = (op: OutboxOp) => Promise<void>;
 const gExec = globalThis as typeof globalThis & { __rhOutboxExecutors?: Map<string, ReplayExecutor> };
@@ -106,7 +110,6 @@ export function enqueueOutbox(op: {
   payload: unknown;
   key?: string;
 }): void {
-  if (state.ops.length >= MAX_OPS) state.ops.shift();
   const entry: OutboxOp = {
     id: crypto.randomUUID(),
     at: new Date().toISOString(),
@@ -116,13 +119,23 @@ export function enqueueOutbox(op: {
     ...(op.key ? { key: op.key } : {}),
     payload: op.payload,
   };
+  // Keyed replacement happens BEFORE the capacity check: a superseding update
+  // must never displace an unrelated op, and an update to an op that is
+  // already beyond the cap still has to be recorded.
   if (op.key) {
     const idx = state.ops.findIndex((o) => o.key === op.key);
-    if (idx >= 0) state.ops[idx] = entry;
-    else state.ops.push(entry);
-  } else {
-    state.ops.push(entry);
+    if (idx >= 0) {
+      state.ops[idx] = entry;
+      persistQueue();
+      return;
+    }
   }
+  if (state.ops.length >= MAX_OPS) {
+    // Capacity eviction is real data loss — keep a forensic record of it.
+    const evicted = state.ops.shift();
+    if (evicted) dropFailed(evicted, `outbox capacity (${MAX_OPS}) exceeded — oldest op evicted`);
+  }
+  state.ops.push(entry);
   persistQueue();
 }
 
@@ -157,6 +170,8 @@ export async function drainOutbox(): Promise<void> {
     while (state.ops.length > 0) {
       // Splice-first so a crash mid-replay never loses an op.
       const op = state.ops[0];
+      // Exponential backoff after a transient failure — skip until due.
+      if (op.nextAttemptAt && op.nextAttemptAt > Date.now()) return;
       const fn = executors.get(op.module);
       if (!fn) {
         // No executor registered yet (module not loaded) — wait; do not spin.
@@ -170,8 +185,20 @@ export async function drainOutbox(): Promise<void> {
       } catch (err: any) {
         const code = err?.code ?? "";
         const msg = String(err?.message ?? err);
-        // Conflict already resolved in DB (duplicate slug/unique) — drop.
-        if (code === "P2002" || code === "P2025") {
+        // P2002: a unique conflict means the row already exists — the write is
+        // effectively applied, replaying can never succeed.
+        if (code === "P2002") {
+          console.warn(`[outbox] Op ${op.module}/${op.action} already applied (${code}); dropping.`);
+          state.ops.shift();
+          persistQueue();
+          continue;
+        }
+        // P2025 ("record not found"): for deletes the target is already gone
+        // (idempotent — resolved). For updates/creates the missing row means
+        // the write did NOT happen (e.g. a queued order whose product vanished
+        // mid-transaction) — dropping it would silently lose the edit, so keep
+        // it and retry with backoff like a transient failure.
+        if (code === "P2025" && /delete|remove|purge|erase/i.test(op.action)) {
           console.warn(`[outbox] Op ${op.module}/${op.action} already resolved (${code}); dropping.`);
           state.ops.shift();
           persistQueue();
@@ -180,19 +207,16 @@ export async function drainOutbox(): Promise<void> {
         // Deterministic data error (validation, bad payload, …): replaying can
         // never succeed. Drop it and KEEP draining — otherwise one poisoned op
         // blocks every later write of its module (the module gate queues new
-        // writes) and the whole queue behind it until MAX_ATTEMPTS is reached.
-        if (!isTransientDbError(err)) {
+        // writes) and the whole queue behind it.
+        if (!isTransientDbError(err) && code !== "P2025") {
           dropFailed(op, msg.slice(0, 600));
           state.ops.shift();
           persistQueue();
           continue;
         }
-        if (op.attempts >= MAX_ATTEMPTS) {
-          dropFailed(op, msg.slice(0, 600));
-          state.ops.shift();
-          persistQueue();
-          continue;
-        }
+        // Transient (or retryable P2025): never drop — back off exponentially
+        // (capped) and keep the op until the database is healthy again.
+        op.nextAttemptAt = Date.now() + Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** Math.min(op.attempts - 1, 12));
         state.ops[0] = op;
         persistQueue();
         // DB still unhealthy — stop draining; retried on wake/timer.

@@ -291,10 +291,20 @@ export async function createUserRecord(
     (err as any).status = 400;
     throw err;
   }
+  if (email.length > 191) {
+    const err = new Error("Email address must be 191 characters or fewer");
+    (err as any).status = 400;
+    throw err;
+  }
 
   const fullName = String(body.fullName ?? "").trim();
   if (fullName.length < 2) {
     const err = new Error("Full name is required");
+    (err as any).status = 400;
+    throw err;
+  }
+  if (fullName.length > 191) {
+    const err = new Error("Full name must be 191 characters or fewer");
     (err as any).status = 400;
     throw err;
   }
@@ -399,8 +409,20 @@ async function applyUserCreate(p: {
   });
 }
 
-async function applyUserUpdate(p: { id: string; data: Record<string, unknown> }): Promise<void> {
-  await prisma.user.update({ where: { id: p.id }, data: p.data as never });
+async function applyUserUpdate(p: { id: string; data: Record<string, unknown>; modules?: Record<ModuleKey, boolean> }): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: p.id }, data: p.data as never });
+    // Role changes reset module access to the role defaults — keep the
+    // persisted user_module_access row in lockstep (sessions recompute
+    // permissions from this row).
+    if (p.modules) {
+      await tx.userModuleAccess.upsert({
+        where: { userId: p.id },
+        create: { userId: p.id, ...accessRowFromModules(p.modules) },
+        update: accessRowFromModules(p.modules),
+      });
+    }
+  });
 }
 
 /** Awaited user persistence helper: DB first, durable outbox on any failure. */
@@ -457,8 +479,7 @@ registerOutboxExecutor("users", async (op) => {
     return;
   }
   if (op.action === "update") {
-    const p = op.payload as { id: string; data: Record<string, unknown> };
-    await prisma.user.update({ where: { id: p.id }, data: p.data as never });
+    await applyUserUpdate(op.payload as never);
     return;
   }
   if (op.action === "delete") {
@@ -510,10 +531,27 @@ export async function updateUserRecord(
     }
   }
 
-  if (body.fullName !== undefined) target.fullName = String(body.fullName).trim();
-  if (body.email !== undefined) target.email = String(body.email).trim().toLowerCase();
+  if (body.fullName !== undefined) {
+    const fullName = String(body.fullName).trim();
+    if (fullName.length > 191) {
+      const err = new Error("Full name must be 191 characters or fewer");
+      (err as any).status = 400;
+      throw err;
+    }
+    target.fullName = fullName;
+  }
+  if (body.email !== undefined) {
+    const email = String(body.email).trim().toLowerCase();
+    if (email.length > 191) {
+      const err = new Error("Email address must be 191 characters or fewer");
+      (err as any).status = 400;
+      throw err;
+    }
+    target.email = email;
+  }
   if (body.isActive !== undefined) target.isActive = Boolean(body.isActive);
 
+  let roleChanged = false;
   if (body.role !== undefined && body.role !== target.role) {
     if (id === actor.id) {
       const err = new Error("You cannot change your own role");
@@ -533,6 +571,7 @@ export async function updateUserRecord(
     }
     target.role = newRole;
     target.modules = computeModules(newRole);
+    roleChanged = true;
   }
 
   if (body.password) {
@@ -562,6 +601,9 @@ export async function updateUserRecord(
         isActive: target.isActive,
         ...(body.password ? { passwordHash: target.passwordHash } : {}),
       },
+      // Persist the role's default module set when the role changed, so a
+      // demoted ADMIN loses CMS/finance/DPDP access on the server too.
+      ...(roleChanged ? { modules: target.modules } : {}),
     },
   };
   await persistUserWrite(op, () => applyUserUpdate(op.payload as never));
@@ -647,8 +689,13 @@ export async function updatePermissionsRecord(
   const current = { ...target.modules };
   for (const [k, v] of Object.entries(mods)) {
     if (k in current) {
-      // Non-superadmins cannot enable settings
-      if (k === "settings") {
+      if (k === "access") {
+        // `access` is a pseudo-module with no DB column (it only lives in the
+        // encrypted session cache used by the offline resolver) — it is
+        // role-derived and can never be granted directly.
+        current[k as ModuleKey] = target.role === "ADMIN";
+      } else if (k === "settings") {
+        // Non-superadmins cannot enable settings
         current[k as ModuleKey] = false;
       } else {
         current[k as ModuleKey] = Boolean(v);

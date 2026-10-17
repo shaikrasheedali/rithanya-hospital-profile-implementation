@@ -19,6 +19,7 @@ import {
   deletePatientRecord,
   addVitalLog,
   getPatientById,
+  prunePatientsFromMemory,
   createClinicalCategory,
   updateClinicalCategory,
   deleteClinicalCategory,
@@ -87,6 +88,9 @@ const uniqueViolation = (e: unknown) => {
 };
 
 export const BLOOD_GROUPS = ["O+ve", "O-ve", "A+ve", "A-ve", "B+ve", "B-ve", "AB+ve", "AB-ve", "Unknown"] as const;
+
+/** Vitals time slots — must match the portal UI (PatientProfile TIME_SLOTS). */
+export const TIME_SLOTS = ["Morning", "Afternoon", "Evening", "Night"] as const;
 
 async function saveConsentPhoto(dataUrl: string): Promise<string> {
   if (dataUrl.startsWith("/api/") || dataUrl.startsWith("http")) return dataUrl;
@@ -247,7 +251,7 @@ const patients: Handler = {
 
       await addVitalLog(id!, {
         recordedAt: body.recordedAt ? new Date(body.recordedAt) : new Date(),
-        timeSlot: body.timeSlot ? String(body.timeSlot) : undefined,
+        timeSlot: body.timeSlot ? oneOf(body.timeSlot, TIME_SLOTS, "time slot") : undefined,
         haemoglobin: hb!,
         spO2: spO2!,
         pulse: pulse!,
@@ -526,10 +530,10 @@ function ledgerValues(b: Record<string, any>, defaultEntity?: string) {
   return {
     entity: oneOf(b.entity ?? defaultEntity ?? "RITHANYA_HOSPITAL", ["RITHANYA_HOSPITAL", "RVBC"] as const, "entity"),
     type: oneOf(b.type, ["CREDIT", "DEBIT"] as const, "type"),
-    itemName: req(b.itemName, "Item name", 200),
+    itemName: req(b.itemName, "Item name", 191),
     description: str(b.description, 1000) || null,
     categoryId: str(b.categoryId, 60) || null,
-    vendorPayee: req(b.vendorPayee, "Vendor / payee", 200),
+    vendorPayee: req(b.vendorPayee, "Vendor / payee", 191),
     amount: num(b.amount, "Amount", { min: 0.01, max: 1e10 })!,
     invoiceRef: str(b.invoiceRef, 80) || null,
     method: oneOf(b.method, ["Cash", "UPI", "NEFT", "Cheque"] as const, "payment mode"),
@@ -611,6 +615,9 @@ const dpdp: Handler = {
           },
         });
       });
+      // Purge the erased records from the in-memory + encrypted caches so the
+      // deleted PII can no longer be served (or resurrected after a restart).
+      prunePatientsFromMemory(hits.map((h) => h.p.id));
       await audit(user, "DPDP_ERASE", "DpdpErasureRequest", id, `${hits.length} record(s) erased`);
       return { ok: true, erased: hits.length };
     },
