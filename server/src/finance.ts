@@ -1,7 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
+import {
+  prisma,
+  isDbOnCooldown,
+  reportDbError,
+  reportDbSuccess,
+  withDbTimeout,
+  DB_READ_MS,
+  DB_WRITE_MS,
+  isTransientDbError,
+} from "./db.js";
+import { enqueueOutbox, outboxHasPending, registerOutboxExecutor, wakeOutbox } from "./outbox.js";
+import { encryptJson, decryptJson } from "./crypto.js";
 
 export type ExpenseCategoryDTO = {
   id: string;
@@ -29,7 +40,7 @@ export type ExpenseLedgerDTO = {
 
 const CACHE_FILE = path.resolve(process.cwd(), "uploads", "finance-cache.json");
 
-const SEED_CATEGORIES: ExpenseCategoryDTO[] = [
+export const SEED_CATEGORIES: ExpenseCategoryDTO[] = [
   {
     id: "cat-pharmacy-supplies",
     entity: "RITHANYA_HOSPITAL",
@@ -81,7 +92,7 @@ const SEED_CATEGORIES: ExpenseCategoryDTO[] = [
   },
 ];
 
-const SEED_LEDGER: ExpenseLedgerDTO[] = [
+export const SEED_LEDGER: ExpenseLedgerDTO[] = [
   {
     id: "led-rh-001",
     entity: "RITHANYA_HOSPITAL",
@@ -139,7 +150,7 @@ function ensurePayrollCategoryExists(): void {
   }
 }
 
-export function pruneOldLedgerEntries(): void {
+export async function pruneOldLedgerEntries(): Promise<void> {
   const now = new Date();
   const currentTotalMonths = now.getFullYear() * 12 + (now.getMonth() + 1);
   const cutoffTotalMonths = currentTotalMonths - 12;
@@ -162,14 +173,18 @@ export function pruneOldLedgerEntries(): void {
     persistCache();
     console.log(`[finance] 12-Month retention pruned ${originalCount - inMemoryFinance.ledger.length} old ledger entries`);
     if (!isDbOnCooldown() && prunedIds.length > 0) {
-      withDbTimeout(
-        prisma.expenseLedger.deleteMany({
-          where: { id: { in: prunedIds } },
-        }),
-        3000
-      ).catch((err) => {
-        reportDbError(err);
-      });
+      try {
+        await withDbTimeout(
+          prisma.expenseLedger.deleteMany({
+            where: { id: { in: prunedIds } },
+          }),
+          DB_WRITE_MS,
+        );
+        reportDbSuccess();
+        wakeOutbox();
+      } catch (err) {
+        if (isTransientDbError(err)) reportDbError(err);
+      }
     }
   }
 }
@@ -178,10 +193,26 @@ function loadCache(): FinanceStore {
   try {
     if (fs.existsSync(CACHE_FILE)) {
       const raw = fs.readFileSync(CACHE_FILE, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.categories) && Array.isArray(parsed.ledger)) {
-        return parsed;
+      // New format: encrypted payload. Legacy: plaintext JSON object.
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = null;
       }
+      if (
+        !(
+          parsed &&
+          typeof parsed === "object" &&
+          Array.isArray((parsed as any).categories) &&
+          Array.isArray((parsed as any).ledger)
+        )
+      ) {
+        const dec = decryptJson<FinanceStore>(raw, null as unknown as FinanceStore);
+        parsed = dec && Array.isArray(dec.categories) && Array.isArray(dec.ledger) ? dec : null;
+      }
+      const store = parsed as FinanceStore | null;
+      if (store) return store;
     }
   } catch (err) {
     console.warn("[finance] Could not read finance cache file:", err);
@@ -196,11 +227,69 @@ function persistCache(): void {
   try {
     const dir = path.dirname(CACHE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(inMemoryFinance, null, 2), "utf-8");
+    // Financial records are sensitive — keep the offline cache encrypted.
+    fs.writeFileSync(CACHE_FILE, encryptJson(inMemoryFinance), "utf-8");
   } catch (err) {
     console.warn("[finance] Could not persist finance cache file:", err);
   }
 }
+
+/** Awaited finance persistence helper: DB first, durable outbox on failure. */
+async function persistFinanceWrite(
+  op: {
+    module: "finance";
+    action: "category.create" | "category.update" | "category.delete" | "ledger.create" | "ledger.update" | "ledger.delete";
+    key: string;
+    payload: unknown;
+  },
+  run: () => Promise<unknown>,
+): Promise<void> {
+  if (outboxHasPending("finance") || isDbOnCooldown()) {
+    enqueueOutbox(op);
+    return;
+  }
+  try {
+    await withDbTimeout(run(), DB_WRITE_MS);
+    reportDbSuccess();
+    wakeOutbox();
+  } catch (err) {
+    if (isTransientDbError(err)) reportDbError(err);
+    console.warn(`[finance] DB write failed (${op.action}) — queued for durable retry:`, (err as Error)?.message || err);
+    enqueueOutbox(op);
+  }
+}
+
+registerOutboxExecutor("finance", async (op) => {
+  const run = op.payload as never;
+  switch (op.action) {
+    case "category.create":
+      await prisma.expenseCategory.create({ data: run as never });
+      break;
+    case "category.update": {
+      const p = op.payload as { id: string; data: Record<string, unknown> };
+      await prisma.expenseCategory.update({ where: { id: p.id }, data: p.data as never });
+      break;
+    }
+    case "category.delete": {
+      const p = op.payload as { id: string };
+      await prisma.expenseCategory.delete({ where: { id: p.id } });
+      break;
+    }
+    case "ledger.create":
+      await prisma.expenseLedger.create({ data: run as never });
+      break;
+    case "ledger.update": {
+      const p = op.payload as { id: string; data: Record<string, unknown> };
+      await prisma.expenseLedger.update({ where: { id: p.id }, data: p.data as never });
+      break;
+    }
+    case "ledger.delete": {
+      const p = op.payload as { id: string };
+      await prisma.expenseLedger.delete({ where: { id: p.id } });
+      break;
+    }
+  }
+});
 
 export async function loadExpenseCategories(entity: string): Promise<ExpenseCategoryDTO[]> {
   ensurePayrollCategoryExists();
@@ -213,8 +302,9 @@ export async function loadExpenseCategories(entity: string): Promise<ExpenseCate
           where: { entity: targetEntity },
           orderBy: { name: "asc" },
         }),
-        2000
+        DB_READ_MS
       );
+      reportDbSuccess();
 
       const dbMapped: ExpenseCategoryDTO[] = rows.map((c) => ({
         id: c.id,
@@ -232,7 +322,7 @@ export async function loadExpenseCategories(entity: string): Promise<ExpenseCate
       persistCache();
       return inMemoryFinance.categories.filter((c) => c.entity === targetEntity).sort((a, b) => a.name.localeCompare(b.name));
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
       console.warn("[finance] DB query failed, falling back to resilient in-memory categories:", (err as Error)?.message || err);
     }
   }
@@ -272,22 +362,22 @@ export async function createExpenseCategoryRecord(data: {
   inMemoryFinance.categories.push(newCat);
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.expenseCategory.create({
-        data: {
-          id,
-          entity,
-          name: newCat.name,
-          description: newCat.description,
-        },
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[finance] Background DB sync for expense category failed:", err?.message || err);
-    });
-  }
+  await persistFinanceWrite(
+    {
+      module: "finance",
+      action: "category.create",
+      key: `cat:${id}`,
+      payload: { id, entity, name: newCat.name, description: newCat.description },
+    },
+    () => prisma.expenseCategory.create({
+      data: {
+        id,
+        entity,
+        name: newCat.name,
+        description: newCat.description,
+      },
+    }),
+  );
 
   return newCat;
 }
@@ -305,21 +395,29 @@ export async function updateExpenseCategoryRecord(
 
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.expenseCategory.update({
-        where: { id },
+  await persistFinanceWrite(
+    {
+      module: "finance",
+      action: "category.update",
+      key: `cat:${id}`,
+      payload: {
+        id,
         data: {
           ...(data.entity ? { entity: cat.entity } : {}),
           ...(data.name !== undefined ? { name: cat.name } : {}),
           ...(data.description !== undefined ? { description: cat.description } : {}),
         },
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-    });
-  }
+      },
+    },
+    () => prisma.expenseCategory.update({
+      where: { id },
+      data: {
+        ...(data.entity ? { entity: cat.entity } : {}),
+        ...(data.name !== undefined ? { name: cat.name } : {}),
+        ...(data.description !== undefined ? { description: cat.description } : {}),
+      },
+    }),
+  );
 
   return cat;
 }
@@ -336,11 +434,10 @@ export async function deleteExpenseCategoryRecord(id: string): Promise<void> {
   if (idx >= 0) inMemoryFinance.categories.splice(idx, 1);
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(prisma.expenseCategory.delete({ where: { id } }), 2500).catch((err) => {
-      reportDbError(err);
-    });
-  }
+  await persistFinanceWrite(
+    { module: "finance", action: "category.delete", key: `cat:${id}`, payload: { id } },
+    () => prisma.expenseCategory.delete({ where: { id } }),
+  );
 }
 
 export async function deleteMonthLedgerEntries(
@@ -372,10 +469,12 @@ export async function deleteMonthLedgerEntries(
         prisma.expenseLedger.deleteMany({
           where: { id: { in: removedIds } },
         }),
-        3000
+        DB_WRITE_MS,
       );
+      reportDbSuccess();
+      wakeOutbox();
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
     }
   }
 
@@ -383,7 +482,7 @@ export async function deleteMonthLedgerEntries(
 }
 
 export async function loadLedgerEntries(entity: string): Promise<ExpenseLedgerDTO[]> {
-  pruneOldLedgerEntries();
+  await pruneOldLedgerEntries();
   ensurePayrollCategoryExists();
   const targetEntity = entity === "RVBC" ? "RVBC" : "RITHANYA_HOSPITAL";
 
@@ -396,7 +495,7 @@ export async function loadLedgerEntries(entity: string): Promise<ExpenseLedgerDT
           take: 500,
           include: { category: true },
         }),
-        2500
+        DB_READ_MS
       );
 
       const dbMapped: ExpenseLedgerDTO[] = rows.map((e) => ({
@@ -425,7 +524,7 @@ export async function loadLedgerEntries(entity: string): Promise<ExpenseLedgerDT
         .filter((l) => l.entity === targetEntity)
         .sort((a, b) => new Date(b.entryDate).getTime() - new Date(a.entryDate).getTime());
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
       console.warn("[finance] DB query failed, falling back to resilient in-memory ledger:", (err as Error)?.message || err);
     }
   }
@@ -483,29 +582,41 @@ export async function createLedgerEntryRecord(data: {
   inMemoryFinance.ledger.unshift(newEntry);
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.expenseLedger.create({
-        data: {
-          id,
-          entity,
-          type: newEntry.type,
-          itemName: newEntry.itemName,
-          description: newEntry.description,
-          categoryId: newEntry.categoryId,
-          vendorPayee: newEntry.vendorPayee,
-          amount: newEntry.amount,
-          invoiceRef: newEntry.invoiceRef,
-          method: newEntry.method,
-          entryDate: new Date(entryDate),
-        },
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[finance] Background DB sync for ledger entry failed:", err?.message || err);
-    });
-  }
+  await persistFinanceWrite(
+    {
+      module: "finance",
+      action: "ledger.create",
+      key: `led:${id}`,
+      payload: {
+        id,
+        entity,
+        type: newEntry.type,
+        itemName: newEntry.itemName,
+        description: newEntry.description,
+        categoryId: newEntry.categoryId,
+        vendorPayee: newEntry.vendorPayee,
+        amount: newEntry.amount,
+        invoiceRef: newEntry.invoiceRef,
+        method: newEntry.method,
+        entryDate,
+      },
+    },
+    () => prisma.expenseLedger.create({
+      data: {
+        id,
+        entity,
+        type: newEntry.type,
+        itemName: newEntry.itemName,
+        description: newEntry.description,
+        categoryId: newEntry.categoryId,
+        vendorPayee: newEntry.vendorPayee,
+        amount: newEntry.amount,
+        invoiceRef: newEntry.invoiceRef,
+        method: newEntry.method,
+        entryDate: new Date(entryDate),
+      },
+    }),
+  );
 
   return newEntry;
 }
@@ -534,10 +645,13 @@ export async function updateLedgerEntryRecord(
 
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.expenseLedger.update({
-        where: { id },
+  await persistFinanceWrite(
+    {
+      module: "finance",
+      action: "ledger.update",
+      key: `led:${id}`,
+      payload: {
+        id,
         data: {
           ...(data.entity ? { entity: entry.entity } : {}),
           ...(data.type ? { type: entry.type } : {}),
@@ -548,14 +662,26 @@ export async function updateLedgerEntryRecord(
           ...(data.amount !== undefined ? { amount: entry.amount } : {}),
           ...(data.invoiceRef !== undefined ? { invoiceRef: entry.invoiceRef } : {}),
           ...(data.method ? { method: entry.method } : {}),
-          ...(data.entryDate ? { entryDate: new Date(entry.entryDate) } : {}),
+          ...(data.entryDate ? { entryDate: entry.entryDate } : {}),
         },
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-    });
-  }
+      },
+    },
+    () => prisma.expenseLedger.update({
+      where: { id },
+      data: {
+        ...(data.entity ? { entity: entry.entity } : {}),
+        ...(data.type ? { type: entry.type } : {}),
+        ...(data.itemName !== undefined ? { itemName: entry.itemName } : {}),
+        ...(data.description !== undefined ? { description: entry.description } : {}),
+        ...(data.categoryId !== undefined ? { categoryId: entry.categoryId } : {}),
+        ...(data.vendorPayee !== undefined ? { vendorPayee: entry.vendorPayee } : {}),
+        ...(data.amount !== undefined ? { amount: entry.amount } : {}),
+        ...(data.invoiceRef !== undefined ? { invoiceRef: entry.invoiceRef } : {}),
+        ...(data.method ? { method: entry.method } : {}),
+        ...(data.entryDate ? { entryDate: new Date(entry.entryDate) } : {}),
+      },
+    }),
+  );
 
   return entry;
 }
@@ -565,9 +691,8 @@ export async function deleteLedgerEntryRecord(id: string): Promise<void> {
   if (idx >= 0) inMemoryFinance.ledger.splice(idx, 1);
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(prisma.expenseLedger.delete({ where: { id } }), 2500).catch((err) => {
-      reportDbError(err);
-    });
-  }
+  await persistFinanceWrite(
+    { module: "finance", action: "ledger.delete", key: `led:${id}`, payload: { id } },
+    () => prisma.expenseLedger.delete({ where: { id } }),
+  );
 }

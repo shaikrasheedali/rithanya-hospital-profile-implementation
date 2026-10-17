@@ -1,7 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
+import {
+  prisma,
+  isDbOnCooldown,
+  reportDbError,
+  reportDbSuccess,
+  withDbTimeout,
+  DB_READ_MS,
+  DB_WRITE_MS,
+  isTransientDbError,
+} from "./db.js";
 import { encryptField, decryptField, encryptJson, decryptJson } from "./crypto.js";
+import { enqueueOutbox, outboxHasPending, registerOutboxExecutor, wakeOutbox } from "./outbox.js";
+import { isTimeSlotColumnReady, ensureColumns } from "./seed.js";
 
 export type VitalDTO = {
   id: string;
@@ -267,9 +278,21 @@ let inMemoryCategories: ClinicalCategoryDTO[] = loadCategoriesCache();
 function loadCache(): PatientDTO[] {
   try {
     if (fs.existsSync(CACHE_FILE)) {
-      const data = fs.readFileSync(CACHE_FILE, "utf-8");
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      const raw = fs.readFileSync(CACHE_FILE, "utf-8");
+      // New format: encrypted payload. Legacy: plaintext JSON array.
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = null;
+      }
+      if (!Array.isArray(parsed)) {
+        const dec = decryptJson<PatientDTO[]>(raw, null as unknown as PatientDTO[]);
+        parsed = Array.isArray(dec) ? dec : null;
+      }
+      if (Array.isArray(parsed) && (parsed as PatientDTO[]).length > 0) {
+        return parsed as PatientDTO[];
+      }
     }
   } catch (err) {
     console.warn("[emr] Could not read patients cache file, using seed defaults:", err);
@@ -280,9 +303,21 @@ function loadCache(): PatientDTO[] {
 function loadCategoriesCache(): ClinicalCategoryDTO[] {
   try {
     if (fs.existsSync(CACHE_CATEGORIES_FILE)) {
-      const data = fs.readFileSync(CACHE_CATEGORIES_FILE, "utf-8");
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) return parsed;
+      const raw = fs.readFileSync(CACHE_CATEGORIES_FILE, "utf-8");
+      // New format: encrypted payload. Legacy: plaintext JSON array.
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = null;
+      }
+      if (!Array.isArray(parsed)) {
+        const dec = decryptJson<ClinicalCategoryDTO[]>(raw, null as unknown as ClinicalCategoryDTO[]);
+        parsed = Array.isArray(dec) ? dec : null;
+      }
+      if (Array.isArray(parsed)) {
+        return parsed as ClinicalCategoryDTO[];
+      }
     }
   } catch (err) {
     console.warn("[emr] Could not read categories cache file:", err);
@@ -294,7 +329,8 @@ function persistCache(): void {
   try {
     const dir = path.dirname(CACHE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(inMemoryPatients, null, 2), "utf-8");
+    // Patient records are PHI — the offline cache must stay encrypted at rest.
+    fs.writeFileSync(CACHE_FILE, encryptJson(inMemoryPatients), "utf-8");
   } catch (err) {
     console.warn("[emr] Could not persist patients cache file:", err);
   }
@@ -304,9 +340,34 @@ function persistCategoriesCache(): void {
   try {
     const dir = path.dirname(CACHE_CATEGORIES_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(CACHE_CATEGORIES_FILE, JSON.stringify(inMemoryCategories, null, 2), "utf-8");
+    fs.writeFileSync(CACHE_CATEGORIES_FILE, encryptJson(inMemoryCategories), "utf-8");
   } catch (err) {
     console.warn("[emr] Could not persist categories cache file:", err);
+  }
+}
+
+/** Awaited EMR persistence helper: DB first, durable outbox on failure. */
+async function persistEmrWrite(
+  op: {
+    module: "emr";
+    action: "patient.create" | "patient.update" | "patient.discharge" | "patient.archive" | "patient.delete" | "vitals.create" | "category.create" | "category.update" | "category.delete";
+    key: string;
+    payload: unknown;
+  },
+  run: () => Promise<unknown>,
+): Promise<void> {
+  if (outboxHasPending("emr") || isDbOnCooldown()) {
+    enqueueOutbox(op);
+    return;
+  }
+  try {
+    await withDbTimeout(run(), DB_WRITE_MS);
+    reportDbSuccess();
+    wakeOutbox();
+  } catch (err) {
+    if (isTransientDbError(err)) reportDbError(err);
+    console.warn(`[emr] DB write failed (${op.action}) — queued for durable retry:`, (err as Error)?.message || err);
+    enqueueOutbox(op);
   }
 }
 
@@ -331,7 +392,7 @@ export async function loadPatients(opts: {
           include: { category: true, stays: { orderBy: { admissionDate: "desc" } }, vitals: { orderBy: { recordedAt: "asc" } } },
           orderBy: { createdAt: "desc" },
         }),
-        1500
+        DB_READ_MS
       );
 
       const dbMapped = rows.map((p) => {
@@ -360,6 +421,7 @@ export async function loadPatients(opts: {
           vitals: p.vitals.map((v) => ({
             id: v.id,
             recordedAt: v.recordedAt.toISOString(),
+            timeSlot: (v as { timeSlot?: string | null }).timeSlot ?? undefined,
             haemoglobin: v.haemoglobin,
             spO2: v.spO2,
             pulse: v.pulse,
@@ -387,7 +449,7 @@ export async function loadPatients(opts: {
       persistCache();
       return dbMapped;
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
       console.warn("[emr] DB query failed, falling back to resilient in-memory store:", (err as Error)?.message || err);
     }
   }
@@ -419,7 +481,7 @@ export async function getPatientById(id: string): Promise<PatientDTO | null> {
           where: { OR: [{ id }, { uhid: id }] },
           include: { category: true, stays: { orderBy: { admissionDate: "desc" } }, vitals: { orderBy: { recordedAt: "asc" } } },
         }),
-        1500
+        DB_READ_MS
       );
       if (p) {
         const s = p.stays[0];
@@ -447,6 +509,7 @@ export async function getPatientById(id: string): Promise<PatientDTO | null> {
           vitals: p.vitals.map((v) => ({
             id: v.id,
             recordedAt: v.recordedAt.toISOString(),
+            timeSlot: (v as { timeSlot?: string | null }).timeSlot ?? undefined,
             haemoglobin: v.haemoglobin,
             spO2: v.spO2,
             pulse: v.pulse,
@@ -466,8 +529,9 @@ export async function getPatientById(id: string): Promise<PatientDTO | null> {
         persistCache();
         return mapped;
       }
+      reportDbSuccess();
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
     }
   }
   if (fromMem) {
@@ -495,8 +559,19 @@ export async function createPatientRecord(data: {
   roomBedNumber?: string | null;
 }): Promise<{ id: string; uhid: string }> {
   const id = `pat-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const count = inMemoryPatients.length + 1;
-  const uhid = `RH-${new Date().getFullYear()}-${String(count).padStart(4, "0")}`;
+  // UHID must be unique forever: derive the next sequence from the highest
+  // existing UHID in memory (which mirrors DB truth after successful loads),
+  // then loop in case of a memory collision.
+  const year = new Date().getFullYear();
+  let nextSeq = inMemoryPatients.reduce((acc, p) => {
+    const m = new RegExp(`^RH-${year}-(\\d{4})$`).exec(p.uhid ?? "");
+    return m ? Math.max(acc, Number(m[1])) : acc;
+  }, 0);
+  let uhid = `RH-${year}-${String(nextSeq + 1).padStart(4, "0")}`;
+  while (inMemoryPatients.some((p) => p.uhid === uhid)) {
+    nextSeq += 1;
+    uhid = `RH-${year}-${String(nextSeq + 1).padStart(4, "0")}`;
+  }
 
   const cat = inMemoryCategories.find((c) => c.id === data.categoryId);
   const newPatient: PatientDTO = {
@@ -526,44 +601,136 @@ export async function createPatientRecord(data: {
   inMemoryPatients.unshift(newPatient);
   persistCache();
 
-  // Non-blocking sync to MySQL DB if connection is healthy
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.$transaction(async (tx) => {
-        const p = await tx.patient.create({
-          data: {
-            id,
-            uhid,
-            fullName: encryptField(data.fullName),
-            contactNumber: encryptField(data.contactNumber),
-            age: data.age,
-            gender: data.gender,
-            bloodGroup: data.bloodGroup,
-            patientType: data.patientType,
-            clinicalCondition: encryptField(data.clinicalCondition ?? ""),
-            allergies: encryptJson(data.allergies ?? []),
-            consentPhotoUrl: data.consentPhotoUrl ?? null,
-            categoryId: data.categoryId ?? null,
-          },
-        });
-        if (data.roomBedNumber && data.patientType === "INPATIENT") {
-          await tx.inpatientStay.create({
-            data: {
-              patientId: p.id,
-              roomBedNumber: data.roomBedNumber,
-            },
-          });
-        }
-        return p;
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[emr] Background DB sync for patient create failed, stored in memory cache:", err?.message || err);
-    });
-  }
+  // Awaited DB write with encrypted PHI; on failure the full row (still
+  // encrypted) is queued in the durable outbox and replayed automatically.
+  const op = {
+    module: "emr" as const,
+    action: "patient.create" as const,
+    key: `patient:${id}`,
+    payload: {
+      id,
+      uhid,
+      fullName: encryptField(newPatient.fullName),
+      contactNumber: encryptField(newPatient.contactNumber),
+      age: newPatient.age,
+      gender: newPatient.gender,
+      bloodGroup: newPatient.bloodGroup,
+      patientType: newPatient.patientType,
+      clinicalCondition: encryptField(newPatient.clinicalCondition),
+      allergies: encryptJson(newPatient.allergies),
+      consentPhotoUrl: newPatient.consentPhotoUrl,
+      categoryId: newPatient.categoryId,
+      roomBedNumber: data.roomBedNumber ?? null,
+      inpatientStay: Boolean(data.roomBedNumber && data.patientType === "INPATIENT"),
+    },
+  };
+  await persistEmrWrite(op, () => applyPatientCreate(op.payload as never));
 
   return { id, uhid };
+}
+
+/** Patient creation transaction shared by live writes and outbox replay. */
+async function applyPatientCreate(p: {
+  id: string;
+  uhid: string;
+  fullName: string;
+  contactNumber: string;
+  age: number;
+  gender: string;
+  bloodGroup: string;
+  patientType: string;
+  clinicalCondition: string;
+  allergies: string;
+  consentPhotoUrl: string | null;
+  categoryId: string | null;
+  roomBedNumber: string | null;
+  inpatientStay: boolean;
+}): Promise<void> {
+  try {
+    await prisma.$transaction(async (tx) => {
+      const created = await tx.patient.create({
+        data: {
+          id: p.id,
+          uhid: p.uhid,
+          fullName: p.fullName,
+          contactNumber: p.contactNumber,
+          age: p.age,
+          gender: p.gender as never,
+          bloodGroup: p.bloodGroup,
+          patientType: p.patientType as never,
+          clinicalCondition: p.clinicalCondition,
+          allergies: p.allergies,
+          consentPhotoUrl: p.consentPhotoUrl,
+          categoryId: p.categoryId,
+        },
+      });
+      if (p.inpatientStay) {
+        await tx.inpatientStay.create({
+          data: {
+            patientId: created.id,
+            roomBedNumber: p.roomBedNumber ?? "",
+          },
+        });
+      }
+    });
+    return;
+  } catch (err: any) {
+    if (err?.code === "P2002") {
+      // Unique collision (an earlier partial insert or UHID raced on another
+      // process): if the row exists under our id, update it; otherwise file a
+      // fresh UHID derived from DB truth and retry once.
+      try {
+        const data: Record<string, unknown> = {
+          uhid: p.uhid,
+          fullName: p.fullName,
+          contactNumber: p.contactNumber,
+          age: p.age,
+          gender: p.gender,
+          bloodGroup: p.bloodGroup,
+          patientType: p.patientType,
+          clinicalCondition: p.clinicalCondition,
+          allergies: p.allergies,
+          consentPhotoUrl: p.consentPhotoUrl,
+          categoryId: p.categoryId,
+        };
+        await prisma.patient.update({ where: { id: p.id }, data: data as never });
+        return;
+      } catch (updateErr: any) {
+        if (updateErr?.code === "P2025") {
+          const year = new Date().getFullYear();
+          const rows = await prisma.patient.findMany({
+            where: { uhid: { startsWith: `RH-${year}-` } },
+            select: { uhid: true },
+          });
+          let max = 0;
+          for (const r of rows) {
+            const m = /-(\d{4})$/.exec(r.uhid);
+            if (m) max = Math.max(max, Number(m[1]));
+          }
+          const freshUhid = `RH-${year}-${String(max + 1).padStart(4, "0")}`;
+          await prisma.patient.create({
+            data: {
+              id: p.id,
+              uhid: freshUhid,
+              fullName: p.fullName,
+              contactNumber: p.contactNumber,
+              age: p.age,
+              gender: p.gender as never,
+              bloodGroup: p.bloodGroup,
+              patientType: p.patientType as never,
+              clinicalCondition: p.clinicalCondition,
+              allergies: p.allergies,
+              consentPhotoUrl: p.consentPhotoUrl,
+              categoryId: p.categoryId,
+            },
+          });
+          return;
+        }
+        throw updateErr;
+      }
+    }
+    throw err;
+  }
 }
 
 export async function updatePatientRecord(
@@ -613,26 +780,38 @@ export async function updatePatientRecord(
     if (data.categoryId !== undefined) set.categoryId = data.categoryId;
     if (data.consentPhotoUrl !== undefined) set.consentPhotoUrl = data.consentPhotoUrl;
 
-    withDbTimeout(
-      prisma.$transaction(async (tx) => {
-        if (Object.keys(set).length) {
-          await tx.patient.update({ where: { id: p.id }, data: set as never });
-        }
-        if (data.roomBedNumber !== undefined && data.roomBedNumber) {
-          await tx.inpatientStay.updateMany({
-            where: { patientId: p.id, status: "ADMITTED" },
-            data: { roomBedNumber: data.roomBedNumber },
-          });
-        }
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[emr] Background DB sync for patient update failed, stored in memory cache:", err?.message || err);
-    });
+    const op = {
+      module: "emr" as const,
+      action: "patient.update" as const,
+      key: `patient:${p.id}`,
+      payload: {
+        id: p.id,
+        set,
+        roomBedNumber: data.roomBedNumber !== undefined ? data.roomBedNumber : undefined,
+      },
+    };
+    await persistEmrWrite(op, () => applyPatientUpdate(op.payload as never));
   }
 
   return { ok: true };
+}
+
+async function applyPatientUpdate(p: {
+  id: string;
+  set: Record<string, unknown>;
+  roomBedNumber?: string | null;
+}): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    if (Object.keys(p.set).length) {
+      await tx.patient.update({ where: { id: p.id }, data: p.set as never });
+    }
+    if (p.roomBedNumber) {
+      await tx.inpatientStay.updateMany({
+        where: { patientId: p.id, status: "ADMITTED" },
+        data: { roomBedNumber: p.roomBedNumber },
+      });
+    }
+  });
 }
 
 export async function addVitalLog(
@@ -684,34 +863,75 @@ export async function addVitalLog(
   p.vitals.push(vital);
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.vitalLog.create({
-        data: {
-          id: vitalId,
-          patientId: p.id,
-          recordedAt: new Date(recordedAtStr),
-          haemoglobin: data.haemoglobin,
-          spO2: data.spO2,
-          pulse: data.pulse,
-          fastingGlucose: data.fastingGlucose ?? null,
-          postPrandialGlucose: data.postPrandialGlucose ?? null,
-          hbA1c: data.hbA1c ?? null,
-          bpSystolic: data.bpSystolic,
-          bpDiastolic: data.bpDiastolic,
-          serumFerritin: data.serumFerritin ?? null,
-          clinicalNotes: notes ? encryptField(notes) : null,
-          recordedByStaff: data.recordedByStaff ?? "Staff",
-        },
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[emr] Background DB sync for vital log failed, stored in memory cache:", err?.message || err);
-    });
+  if (!isTimeSlotColumnReady()) {
+    // The time_slot column ships via boot ALTER; retry the ensure once if the
+    // flag has not been set yet so vitals persist their day-part slot.
+    await ensureColumns();
   }
 
+  const op = {
+    module: "emr" as const,
+    action: "vitals.create" as const,
+    key: `vitals:${vitalId}`,
+    payload: {
+      id: vitalId,
+      patientId: p.id,
+      recordedAt: recordedAtStr,
+      timeSlot: isTimeSlotColumnReady() ? (data.timeSlot ?? "Morning") : undefined,
+      haemoglobin: data.haemoglobin,
+      spO2: data.spO2,
+      pulse: data.pulse,
+      fastingGlucose: data.fastingGlucose ?? null,
+      postPrandialGlucose: data.postPrandialGlucose ?? null,
+      hbA1c: data.hbA1c ?? null,
+      bpSystolic: data.bpSystolic,
+      bpDiastolic: data.bpDiastolic,
+      serumFerritin: data.serumFerritin ?? null,
+      clinicalNotes: notes ? encryptField(notes) : null,
+      recordedByStaff: data.recordedByStaff ?? "Staff",
+    },
+  };
+  await persistEmrWrite(op, () => applyVitalCreate(op.payload as never));
+
   return { ok: true, id: vitalId };
+}
+
+async function applyVitalCreate(p: {
+  id: string;
+  patientId: string;
+  recordedAt: string;
+  timeSlot?: string;
+  haemoglobin: number;
+  spO2: number;
+  pulse: number;
+  fastingGlucose: number | null;
+  postPrandialGlucose: number | null;
+  hbA1c: number | null;
+  bpSystolic: number;
+  bpDiastolic: number;
+  serumFerritin: number | null;
+  clinicalNotes: string | null;
+  recordedByStaff: string;
+}): Promise<void> {
+  await prisma.vitalLog.create({
+    data: {
+      id: p.id,
+      patientId: p.patientId,
+      recordedAt: new Date(p.recordedAt),
+      ...(p.timeSlot ? { timeSlot: p.timeSlot } : {}),
+      haemoglobin: p.haemoglobin,
+      spO2: p.spO2,
+      pulse: p.pulse,
+      fastingGlucose: p.fastingGlucose,
+      postPrandialGlucose: p.postPrandialGlucose,
+      hbA1c: p.hbA1c,
+      bpSystolic: p.bpSystolic,
+      bpDiastolic: p.bpDiastolic,
+      serumFerritin: p.serumFerritin,
+      clinicalNotes: p.clinicalNotes,
+      recordedByStaff: p.recordedByStaff,
+    },
+  });
 }
 
 export async function dischargePatientRecord(id: string, notes?: string): Promise<{ ok: boolean }> {
@@ -723,26 +943,29 @@ export async function dischargePatientRecord(id: string, notes?: string): Promis
   p.dischargeNotes = notes ?? "";
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.$transaction(async (tx) => {
-        await tx.patient.update({ where: { id: p.id }, data: { isDischarged: true } });
-        await tx.inpatientStay.updateMany({
-          where: { patientId: p.id, status: "ADMITTED" },
-          data: {
-            status: "DISCHARGED",
-            dischargeDate: new Date(),
-            dischargeNotes: notes ? encryptField(notes) : null,
-          },
-        });
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-    });
-  }
+  const op = {
+    module: "emr" as const,
+    action: "patient.discharge" as const,
+    key: `patient-discharge:${p.id}`,
+    payload: { id: p.id, notes: notes ? encryptField(notes) : null },
+  };
+  await persistEmrWrite(op, () => applyPatientDischarge(op.payload as never));
 
   return { ok: true };
+}
+
+async function applyPatientDischarge(p: { id: string; notes: string | null }): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.patient.update({ where: { id: p.id }, data: { isDischarged: true } });
+    await tx.inpatientStay.updateMany({
+      where: { patientId: p.id, status: "ADMITTED" },
+      data: {
+        status: "DISCHARGED",
+        dischargeDate: new Date(),
+        dischargeNotes: p.notes,
+      },
+    });
+  });
 }
 
 export async function archivePatientRecord(id: string, isArchived: boolean): Promise<{ ok: boolean }> {
@@ -752,44 +975,46 @@ export async function archivePatientRecord(id: string, isArchived: boolean): Pro
   p.isArchived = isArchived;
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(prisma.patient.update({ where: { id: p.id }, data: { isArchived } }), 2000).catch((err) => {
-      reportDbError(err);
-    });
-  }
+  await persistEmrWrite(
+    { module: "emr", action: "patient.archive", key: `patient-archive:${p.id}`, payload: { id: p.id, isArchived } },
+    () => prisma.patient.update({ where: { id: p.id }, data: { isArchived } }),
+  );
 
   return { ok: true };
 }
 
 export async function deletePatientRecord(id: string): Promise<{ ok: boolean }> {
-  const idx = inMemoryPatients.findIndex((x) => x.id === id || x.uhid === id);
+  // Resolve the true patient id first (callers may pass a UHID) so every
+  // cascade target — vitals, stays, audit trail — is purged, not just the row.
+  const p = inMemoryPatients.find((x) => x.id === id || x.uhid === id);
+  const resolvedId = p?.id ?? id;
+  const idx = inMemoryPatients.findIndex((x) => x.id === resolvedId || x.uhid === id);
   if (idx >= 0) {
     inMemoryPatients.splice(idx, 1);
   }
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.$transaction(async (tx) => {
-        await tx.vitalLog.deleteMany({ where: { patientId: id } });
-        await tx.inpatientStay.deleteMany({ where: { patientId: id } });
-        await tx.patient.delete({ where: { id } });
-      }),
-      3000
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[emr] Background DB patient delete failed:", err?.message || err);
-    });
-  }
+  await persistEmrWrite(
+    { module: "emr", action: "patient.delete", key: `patient-delete:${resolvedId}`, payload: { id: resolvedId } },
+    () => applyPatientDelete(resolvedId),
+  );
 
   return { ok: true };
+}
+
+async function applyPatientDelete(id: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.vitalLog.deleteMany({ where: { patientId: id } });
+    await tx.inpatientStay.deleteMany({ where: { patientId: id } });
+    await tx.patient.deleteMany({ where: { id } });
+  });
 }
 
 export async function loadCategories(): Promise<ClinicalCategoryDTO[]> {
   if (!isDbOnCooldown()) {
     try {
-      const rows = await withDbTimeout(prisma.clinicalCategory.findMany({ orderBy: { name: "asc" } }), 1500);
-      const counts = await withDbTimeout(prisma.patient.groupBy({ by: ["categoryId"], _count: { categoryId: true } }), 1500);
+      const rows = await withDbTimeout(prisma.clinicalCategory.findMany({ orderBy: { name: "asc" } }), DB_READ_MS);
+      const counts = await withDbTimeout(prisma.patient.groupBy({ by: ["categoryId"], _count: { categoryId: true } }), DB_READ_MS);
       const map = new Map<string, number>();
       for (const c of counts) if (c.categoryId) map.set(c.categoryId, c._count.categoryId);
       const mapped = rows.map((c) => ({
@@ -800,9 +1025,10 @@ export async function loadCategories(): Promise<ClinicalCategoryDTO[]> {
       }));
       inMemoryCategories = mapped;
       persistCategoriesCache();
+      reportDbSuccess();
       return mapped;
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
     }
   }
 
@@ -837,17 +1063,15 @@ export async function createClinicalCategory(data: { name: string; description?:
   inMemoryCategories.push(newCat);
   persistCategoriesCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.clinicalCategory.create({
-        data: { id, name: newCat.name, description: newCat.description || null },
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[emr] Background DB sync for clinical category create failed:", err?.message || err);
-    });
-  }
+  await persistEmrWrite(
+    {
+      module: "emr",
+      action: "category.create",
+      key: `category:${id}`,
+      payload: { id, name: newCat.name, description: newCat.description || null },
+    },
+    () => prisma.clinicalCategory.create({ data: { id, name: newCat.name, description: newCat.description || null } }),
+  );
 
   return newCat;
 }
@@ -868,17 +1092,15 @@ export async function updateClinicalCategory(id: string, data: { name: string; d
   if (data.description !== undefined) cat.description = data.description ? data.description.trim() : "";
   persistCategoriesCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.clinicalCategory.update({
-        where: { id },
-        data: { name: cat.name, description: cat.description || null },
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-    });
-  }
+  await persistEmrWrite(
+    {
+      module: "emr",
+      action: "category.update",
+      key: `category:${id}`,
+      payload: { id, name: cat.name, description: cat.description || null },
+    },
+    () => prisma.clinicalCategory.update({ where: { id }, data: { name: cat.name, description: cat.description || null } }),
+  );
 
   return cat;
 }
@@ -888,10 +1110,60 @@ export async function deleteClinicalCategory(id: string): Promise<void> {
   if (idx >= 0) inMemoryCategories.splice(idx, 1);
   persistCategoriesCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(prisma.clinicalCategory.delete({ where: { id } }), 2500).catch((err) => {
-      reportDbError(err);
-    });
-  }
+  await persistEmrWrite(
+    { module: "emr", action: "category.delete", key: `category-delete:${id}`, payload: { id } },
+    () => prisma.clinicalCategory.delete({ where: { id } }),
+  );
 }
+
+// ---------------------------------------------------------------------------
+// Durable outbox replay for EMR (patients, vitals, categories)
+// ---------------------------------------------------------------------------
+registerOutboxExecutor("emr", async (op) => {
+  switch (op.action) {
+    case "patient.create":
+      await applyPatientCreate(op.payload as never);
+      return;
+    case "patient.update":
+      await applyPatientUpdate(op.payload as never);
+      return;
+    case "patient.discharge":
+      await applyPatientDischarge(op.payload as never);
+      return;
+    case "patient.archive": {
+      const p = op.payload as { id: string; isArchived: boolean };
+      await withDbTimeout(prisma.patient.update({ where: { id: p.id }, data: { isArchived: p.isArchived } }), DB_WRITE_MS);
+      return;
+    }
+    case "patient.delete": {
+      const p = op.payload as { id: string };
+      await applyPatientDelete(p.id);
+      return;
+    }
+    case "vitals.create": {
+      const p = op.payload as { timeSlot?: string };
+      if (p.timeSlot && !isTimeSlotColumnReady()) {
+        await ensureColumns();
+      }
+      await applyVitalCreate(op.payload as never);
+      return;
+    }
+    case "category.create": {
+      const p = op.payload as { id: string; name: string; description: string | null };
+      await prisma.clinicalCategory.create({ data: { id: p.id, name: p.name, description: p.description } });
+      return;
+    }
+    case "category.update": {
+      const p = op.payload as { id: string; name: string; description: string | null };
+      await prisma.clinicalCategory.update({ where: { id: p.id }, data: { name: p.name, description: p.description } });
+      return;
+    }
+    /** category.delete replay: deleteMany is idempotent when the row is gone. */
+    case "category.delete": {
+      const p = op.payload as { id: string };
+      await prisma.clinicalCategory.deleteMany({ where: { id: p.id } });
+      return;
+    }
+  }
+});
 

@@ -1,7 +1,9 @@
 import { Router } from "express";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "../db.js";
+import { prisma, isDbOnCooldown, reportDbError, reportDbSuccess, withDbTimeout, DB_READ_MS, DB_WRITE_MS, isTransientDbError } from "../db.js";
+import { inMemoryAssetStore } from "../media.js";
+import { enqueueOutbox } from "../outbox.js";
 import { requireAuth, getUser, getEntity, audit } from "../auth.js";
 import { isCollection } from "../cms.js";
 import { createItem, updateItem, deleteItem, listCollection } from "../cms.js";
@@ -149,7 +151,7 @@ router.delete("/media/purge", requireAuth("cms"), async (req, res) => {
   const errors: string[] = [];
   for (const a of unlinked) {
     try {
-      await withDbTimeout(prisma.mediaAsset.delete({ where: { id: a.id } }), 2500);
+      await withDbTimeout(prisma.mediaAsset.delete({ where: { id: a.id } }), DB_WRITE_MS);
       await deleteAssetFile(a);
       removed += 1;
     } catch (e) {
@@ -166,7 +168,37 @@ router.delete("/media/purge", requireAuth("cms"), async (req, res) => {
 
 router.delete("/media/:id", requireAuth("cms"), async (req, res) => {
   const user = getUser(req);
-  const asset = await prisma.mediaAsset.findUnique({ where: { id: param(req.params.id) }, include: { links: true } });
+  const assetId = param(req.params.id);
+
+  if (isDbOnCooldown()) {
+    // DB down: detach the asset from the in-memory picker so it stops showing,
+    // and queue the authoritative DB delete for replay.
+    const raw = assetId.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
+    for (const key of [assetId, raw, `media-${raw}`]) {
+      const mem = inMemoryAssetStore.get(key);
+      if (mem) {
+        inMemoryAssetStore.delete(key);
+        await deleteAssetFile(mem).catch(() => undefined);
+        break;
+      }
+    }
+    enqueueOutbox({ module: "media", action: "delete", key: `asset:${assetId}`, payload: { id: assetId } });
+    await audit(user, "DELETE_MEDIA", "MediaAsset", assetId, "(queued while database busy)");
+    res.json({ ok: true, queued: true });
+    return;
+  }
+
+  let asset;
+  try {
+    asset = await withDbTimeout(
+      prisma.mediaAsset.findUnique({ where: { id: assetId }, include: { links: true } }),
+      DB_READ_MS,
+    );
+  } catch (err) {
+    if (isTransientDbError(err)) reportDbError(err);
+    res.status(503).json({ error: "Database temporarily busy — please try again in a moment." });
+    return;
+  }
   if (!asset) {
     res.status(404).json({ error: "Asset not found" });
     return;
@@ -178,7 +210,11 @@ router.delete("/media/:id", requireAuth("cms"), async (req, res) => {
     res.status(409).json({ error: `Asset is used by ${refs} item(s) and cannot be deleted` });
     return;
   }
-  await prisma.mediaAsset.delete({ where: { id: asset.id } });
+  await withDbTimeout(prisma.mediaAsset.delete({ where: { id: asset.id } }), DB_WRITE_MS);
+  // Keep cache and disk in sync with the DB reality.
+  inMemoryAssetStore.delete(asset.id);
+  inMemoryAssetStore.delete(asset.filename);
+  inMemoryAssetStore.delete(`media-${asset.filename}`);
   await deleteAssetFile(asset);
   await audit(user, "DELETE_MEDIA", "MediaAsset", asset.id, asset.originalName);
   res.json({ ok: true });
@@ -257,7 +293,7 @@ router.get("/r/:resource", requireAuth(), async (req, res) => {
       case "orders": res.json({ items: await loadOrders() }); return;
       case "appointments": {
         if (isDbOnCooldown()) { res.json({ items: [] }); return; }
-        const items = await withDbTimeout(prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 300 }), 2000).catch(() => []);
+        const items = await withDbTimeout(prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 300 }), DB_READ_MS).catch(() => []);
         res.json({ items });
         return;
       }
@@ -404,7 +440,7 @@ router.get("/appointments", requireAuth("emr"), async (_req, res) => {
     return;
   }
   try {
-    res.json({ items: await withDbTimeout(prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 300 }), 1500) });
+    res.json({ items: await withDbTimeout(prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 300 }), DB_READ_MS) });
   } catch (err) {
     reportDbError(err);
     console.warn("[portal:appointments] Query failed, returning empty list:", err);
@@ -464,7 +500,7 @@ router.get("/payslip/:id", requireAuth("hr"), async (req, res) => {
   try {
     const payslip = await getPayslipById(param(req.params.id));
     if (!payslip) {
-      const record = await withDbTimeout(prisma.payrollRecord.findUnique({ where: { id: param(req.params.id) }, include: { employee: true } }), 1500);
+      const record = await withDbTimeout(prisma.payrollRecord.findUnique({ where: { id: param(req.params.id) }, include: { employee: true } }), DB_READ_MS);
       if (!record) {
         res.status(404).json({ error: "Payslip not found" });
         return;
@@ -673,7 +709,7 @@ router.get("/dpdp-requests", requireAuth("dpdp"), async (_req, res) => {
     return;
   }
   try {
-    res.json({ items: await withDbTimeout(prisma.dpdpErasureRequest.findMany({ orderBy: { createdAt: "desc" }, take: 300 }), 1500) });
+    res.json({ items: await withDbTimeout(prisma.dpdpErasureRequest.findMany({ orderBy: { createdAt: "desc" }, take: 300 }), DB_READ_MS) });
   } catch (err) {
     reportDbError(err);
     res.json({ items: [] });
@@ -708,7 +744,7 @@ router.get("/audit-logs", requireAuth("settings"), async (_req, res) => {
     return;
   }
   try {
-    res.json({ items: await withDbTimeout(prisma.auditLog.findMany({ orderBy: { timestamp: "desc" }, take: 40 }), 1500) });
+    res.json({ items: await withDbTimeout(prisma.auditLog.findMany({ orderBy: { timestamp: "desc" }, take: 40 }), DB_READ_MS) });
   } catch (err) {
     reportDbError(err);
     res.json({ items: [] });

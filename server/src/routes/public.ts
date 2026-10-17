@@ -2,7 +2,8 @@ import { Router } from "express";
 import crypto from "node:crypto";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "../db.js";
+import { prisma, isDbOnCooldown, reportDbError, reportDbSuccess, withDbTimeout, DB_WRITE_MS, isTransientDbError } from "../db.js";
+import { enqueueOutbox, outboxHasPending, registerOutboxExecutor, wakeOutbox } from "../outbox.js";
 import { createOrder } from "../orders.js";
 import { getSettings } from "../settings.js";
 import {
@@ -197,27 +198,32 @@ router.post("/appointments", async (req, res) => {
     return;
   }
   const src = ["CONTACT", "THALASSEMIA"].includes(String(source)) ? String(source) : "WEBSITE";
+  const data = {
+    fullName: name.slice(0, 120),
+    phone: ph.slice(0, 30),
+    department: String(department ?? "").slice(0, 200),
+    preferredDate: String(preferredDate ?? "").slice(0, 40),
+    message: String(message ?? "").slice(0, 1500),
+    source: src,
+  };
+  // Stable id so an appointment is never double-booked by a replay.
+  const appointmentId = `apt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const op = { module: "appointments", action: "create", key: `appointment:${appointmentId}`, payload: { id: appointmentId, data } };
+  if (outboxHasPending("appointments") || isDbOnCooldown()) {
+    // DB unreachable: acknowledge receipt and queue durably for replay.
+    enqueueOutbox(op);
+    res.json({ ok: true, queued: true });
+    return;
+  }
   try {
-    if (!isDbOnCooldown()) {
-      await withDbTimeout(
-        prisma.appointment.create({
-          data: {
-            fullName: name.slice(0, 120),
-            phone: ph.slice(0, 30),
-            department: String(department ?? "").slice(0, 200),
-            preferredDate: String(preferredDate ?? "").slice(0, 40),
-            message: String(message ?? "").slice(0, 1500),
-            source: src,
-          },
-        }),
-        1500,
-      );
-    }
+    await withDbTimeout(prisma.appointment.create({ data: { id: appointmentId, ...data } }), DB_WRITE_MS);
+    reportDbSuccess();
+    wakeOutbox();
     res.json({ ok: true });
   } catch (err) {
-    reportDbError(err);
-    console.warn("[appointments] Appointment saved in offline queue:", err);
-    res.json({ ok: true, notice: "Appointment received. Our care desk will call you shortly." });
+    if (isTransientDbError(err)) reportDbError(err);
+    enqueueOutbox(op);
+    res.json({ ok: true, queued: true });
   }
 });
 
@@ -295,6 +301,18 @@ router.get("/dpdp", async (req, res) => {
     updatedAt: row.updatedAt,
     note: row.status === "PENDING" ? null : row.resolutionNotes,
   });
+});
+
+// ---------------------------------------------------------------------------
+// Durable outbox replay for public appointment submissions
+// ---------------------------------------------------------------------------
+registerOutboxExecutor("appointments", async (op) => {
+  if (op.action !== "create") return;
+  const p = (op.payload ?? {}) as { id?: string; data?: Record<string, unknown> };
+  if (!p.data) return;
+  const data: Record<string, unknown> = { ...p.data };
+  if (p.id && !data.id) data.id = p.id;
+  await withDbTimeout(prisma.appointment.create({ data: data as never }), DB_WRITE_MS);
 });
 
 export default router;

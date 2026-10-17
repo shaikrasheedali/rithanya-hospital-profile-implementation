@@ -1,9 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
+import {
+  prisma,
+  isDbOnCooldown,
+  reportDbError,
+  reportDbSuccess,
+  withDbTimeout,
+  DB_READ_MS,
+  DB_WRITE_MS,
+  isTransientDbError,
+} from "./db.js";
 import { loadEmployees } from "./employees.js";
 import { computeMonthlyPayroll, daysInMonth } from "./payroll.js";
+import { enqueueOutbox, outboxHasPending, registerOutboxExecutor, wakeOutbox } from "./outbox.js";
+import { encryptJson, decryptJson } from "./crypto.js";
 
 export type PayrollRecordDTO = {
   id: string;
@@ -29,23 +40,23 @@ export type PayrollRecordDTO = {
 
 const CACHE_FILE = path.resolve(process.cwd(), "uploads", "payroll-cache.json");
 
-// Initial demo seeded records
+// Initial demo seeded records (fixed ids so DB rows match the in-memory store)
 const SEED_RECORDS: PayrollRecordDTO[] = [
   {
     id: "pay-seed-001",
-    employeeId: "emp-dr-narayana",
+    employeeId: "emp-rh-narayana",
     entity: "RITHANYA_HOSPITAL",
     month: 10,
     year: 2026,
-    baseSalary: 150000,
+    baseSalary: 120000,
     calendarDays: 31,
     lopDays: 0,
     paidDays: 31,
-    perDaySalary: 4838.71,
+    perDaySalary: 3870.97,
     lopDeduction: 0,
     allowances: 15000,
     otherDeductions: 5000,
-    netPayable: 160000,
+    netPayable: 130000,
     authorizerName: "Hospital Superadmin",
     signedAt: new Date("2026-10-01T10:00:00.000Z").toISOString(),
     createdAt: new Date("2026-10-01T10:00:00.000Z").toISOString(),
@@ -53,19 +64,19 @@ const SEED_RECORDS: PayrollRecordDTO[] = [
   },
   {
     id: "pay-seed-002",
-    employeeId: "emp-s-kavitha",
+    employeeId: "emp-rh-swathi",
     entity: "RITHANYA_HOSPITAL",
     month: 10,
     year: 2026,
-    baseSalary: 45000,
+    baseSalary: 32000,
     calendarDays: 31,
     lopDays: 1,
     paidDays: 30,
-    perDaySalary: 1451.61,
-    lopDeduction: 1451.61,
+    perDaySalary: 1032.26,
+    lopDeduction: 1032.26,
     allowances: 3000,
     otherDeductions: 1000,
-    netPayable: 45548.39,
+    netPayable: 32967.74,
     authorizerName: "Hospital Superadmin",
     signedAt: new Date("2026-10-01T10:00:00.000Z").toISOString(),
     createdAt: new Date("2026-10-01T10:00:00.000Z").toISOString(),
@@ -73,14 +84,28 @@ const SEED_RECORDS: PayrollRecordDTO[] = [
   },
 ];
 
+export { SEED_RECORDS };
+
 let inMemoryPayroll: PayrollRecordDTO[] = loadCache();
 
 function loadCache(): PayrollRecordDTO[] {
   try {
     if (fs.existsSync(CACHE_FILE)) {
       const raw = fs.readFileSync(CACHE_FILE, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      // New format: encrypted payload. Legacy: plaintext JSON array.
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = null;
+      }
+      if (!Array.isArray(parsed)) {
+        const dec = decryptJson<PayrollRecordDTO[]>(raw, null as unknown as PayrollRecordDTO[]);
+        parsed = Array.isArray(dec) ? dec : null;
+      }
+      if (Array.isArray(parsed) && (parsed as PayrollRecordDTO[]).length > 0) {
+        return parsed as PayrollRecordDTO[];
+      }
     }
   } catch (err) {
     console.warn("[payrollStore] Could not read payroll cache file:", err);
@@ -92,9 +117,30 @@ function persistCache(): void {
   try {
     const dir = path.dirname(CACHE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(inMemoryPayroll, null, 2), "utf-8");
+    // Payroll data is sensitive — keep the offline cache encrypted.
+    fs.writeFileSync(CACHE_FILE, encryptJson(inMemoryPayroll), "utf-8");
   } catch (err) {
     console.warn("[payrollStore] Could not persist payroll cache file:", err);
+  }
+}
+
+/** Awaited payroll persistence helper: DB first, durable outbox on failure. */
+async function persistPayrollWrite(
+  op: { module: "payroll"; action: "upsert" | "delete"; key: string; payload: unknown },
+  run: () => Promise<unknown>,
+): Promise<void> {
+  if (outboxHasPending("payroll") || isDbOnCooldown()) {
+    enqueueOutbox(op);
+    return;
+  }
+  try {
+    await withDbTimeout(run(), DB_WRITE_MS);
+    reportDbSuccess();
+    wakeOutbox();
+  } catch (err) {
+    if (isTransientDbError(err)) reportDbError(err);
+    console.warn(`[payrollStore] DB write failed (${op.action}) — queued for durable retry:`, (err as Error)?.message || err);
+    enqueueOutbox(op);
   }
 }
 
@@ -103,7 +149,7 @@ function persistCache(): void {
  * Keep only records from the last 12 months up to the current date.
  * Any record older than 12 months is permanently pruned.
  */
-export function pruneOldPayrollRecords(): void {
+export async function pruneOldPayrollRecords(): Promise<void> {
   const now = new Date();
   const currentTotalMonths = now.getFullYear() * 12 + (now.getMonth() + 1);
   const cutoffTotalMonths = currentTotalMonths - 12;
@@ -125,14 +171,16 @@ export function pruneOldPayrollRecords(): void {
     console.log(`[payrollStore] 12-Month retention pruned ${originalCount - inMemoryPayroll.length} old payroll records`);
 
     if (!isDbOnCooldown() && prunedRecords.length > 0) {
-      withDbTimeout(
-        prisma.payrollRecord.deleteMany({
-          where: { id: { in: prunedRecords } },
-        }),
-        3000
-      ).catch((err) => {
-        reportDbError(err);
-      });
+      try {
+        await withDbTimeout(
+          prisma.payrollRecord.deleteMany({ where: { id: { in: prunedRecords } } }),
+          DB_WRITE_MS,
+        );
+        reportDbSuccess();
+        wakeOutbox();
+      } catch (err) {
+        if (isTransientDbError(err)) reportDbError(err);
+      }
     }
   }
 }
@@ -153,7 +201,7 @@ export async function loadPayrollData(
   records: PayrollRecordDTO[];
 }> {
   // Prune any records older than 12 months
-  pruneOldPayrollRecords();
+  await pruneOldPayrollRecords();
 
   const targetEntity = entity === "RVBC" ? "RVBC" : "RITHANYA_HOSPITAL";
   const allEmployees = await loadEmployees(targetEntity);
@@ -180,8 +228,9 @@ export async function loadPayrollData(
           },
           include: { employee: true },
         }),
-        2500
+        DB_READ_MS
       );
+      reportDbSuccess();
 
       for (const r of dbRecords) {
         const mapped: PayrollRecordDTO = {
@@ -214,7 +263,7 @@ export async function loadPayrollData(
       }
       persistCache();
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
       console.warn("[payrollStore] DB query failed, falling back to resilient payroll cache:", (err as Error)?.message || err);
     }
   }
@@ -299,57 +348,100 @@ export async function savePayrollRecord(data: {
   }
   persistCache();
 
-  // Background DB sync
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
+  const dbData = {
+    id: record.id,
+    employeeId: record.employeeId,
+    month: record.month,
+    year: record.year,
+    baseSalary: record.baseSalary,
+    calendarDays: record.calendarDays,
+    lopDays: record.lopDays,
+    paidDays: record.paidDays,
+    lopDeduction: record.lopDeduction,
+    allowances: record.allowances,
+    otherDeductions: record.otherDeductions,
+    netPayable: record.netPayable,
+    authorizerName: record.authorizerName,
+    authorizerSignSvg: record.authorizerSignSvg,
+    signedAt: record.signedAt ? new Date(record.signedAt) : null,
+  };
+
+  await persistPayrollWrite(
+    {
+      module: "payroll",
+      action: "upsert",
+      key: `pay:${record.employeeId}:${record.year}-${record.month}`,
+      payload: { employeeId: record.employeeId, month: record.month, year: record.year, data: dbData },
+    },
+    () =>
       prisma.payrollRecord.upsert({
         where: {
           employeeId_month_year: {
-            employeeId: data.employeeId,
-            month: data.month,
-            year: data.year,
+            employeeId: record.employeeId,
+            month: record.month,
+            year: record.year,
           },
         },
-        create: {
-          id: record.id,
-          employeeId: record.employeeId,
-          month: record.month,
-          year: record.year,
-          baseSalary: record.baseSalary,
-          calendarDays: record.calendarDays,
-          lopDays: record.lopDays,
-          paidDays: record.paidDays,
-          lopDeduction: record.lopDeduction,
-          allowances: record.allowances,
-          otherDeductions: record.otherDeductions,
-          netPayable: record.netPayable,
-          authorizerName: record.authorizerName,
-          authorizerSignSvg: record.authorizerSignSvg,
-          signedAt: record.signedAt ? new Date(record.signedAt) : null,
-        },
+        create: dbData,
         update: {
-          baseSalary: record.baseSalary,
-          calendarDays: record.calendarDays,
-          lopDays: record.lopDays,
-          paidDays: record.paidDays,
-          lopDeduction: record.lopDeduction,
-          allowances: record.allowances,
-          otherDeductions: record.otherDeductions,
-          netPayable: record.netPayable,
-          authorizerName: record.authorizerName,
-          authorizerSignSvg: record.authorizerSignSvg,
-          signedAt: record.signedAt ? new Date(record.signedAt) : null,
+          baseSalary: dbData.baseSalary,
+          calendarDays: dbData.calendarDays,
+          lopDays: dbData.lopDays,
+          paidDays: dbData.paidDays,
+          lopDeduction: dbData.lopDeduction,
+          allowances: dbData.allowances,
+          otherDeductions: dbData.otherDeductions,
+          netPayable: dbData.netPayable,
+          authorizerName: dbData.authorizerName,
+          authorizerSignSvg: dbData.authorizerSignSvg,
+          signedAt: dbData.signedAt,
         },
       }),
-      3000
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[payrollStore] Background DB sync failed, saved safely in memory cache:", err?.message || err);
-    });
-  }
+  );
 
   return record;
 }
+
+/**
+ * Hard-delete a payroll slip (memory + DB). The DB deleteMany is idempotent,
+ * so replayed outbox ops never resurrect anything.
+ */
+export async function deletePayrollRecord(id: string): Promise<void> {
+  const idx = inMemoryPayroll.findIndex((r) => r.id === id);
+  if (idx >= 0) inMemoryPayroll.splice(idx, 1);
+  persistCache();
+
+  await persistPayrollWrite(
+    { module: "payroll", action: "delete", key: `pay:${id}`, payload: { id } },
+    () => prisma.payrollRecord.deleteMany({ where: { id } }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Durable outbox replay for payroll
+// ---------------------------------------------------------------------------
+registerOutboxExecutor("payroll", async (op) => {
+  if (op.action === "upsert") {
+    const p = op.payload as { employeeId: string; month: number; year: number; data: Record<string, unknown> };
+    await prisma.payrollRecord.upsert({
+      where: {
+        employeeId_month_year: {
+          employeeId: p.employeeId,
+          month: p.month,
+          year: p.year,
+        },
+      },
+      create: p.data as never,
+      update: p.data as never,
+    });
+    return;
+  }
+  if (op.action === "delete") {
+    const p = op.payload as { id: string };
+    await prisma.payrollRecord.deleteMany({ where: { id: p.id } });
+    return;
+  }
+});
 
 export async function getPayslipById(id: string): Promise<{
   record: PayrollRecordDTO & { employee: any };

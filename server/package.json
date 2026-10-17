@@ -36,7 +36,6 @@
     "morgan": "^1.10.0",
     "multer": "^2.4.0",
     "mysql2": "^3.24.5",
-    "rithanya-full-stack": "file:..",
     "sharp": "^0.35.5"
   },
   "devDependencies": {

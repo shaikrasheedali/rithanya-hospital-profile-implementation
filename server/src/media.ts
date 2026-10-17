@@ -2,7 +2,16 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import sharp from "sharp";
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
+import {
+  prisma,
+  isDbOnCooldown,
+  reportDbError,
+  reportDbSuccess,
+  withDbTimeout,
+  DB_WRITE_MS,
+  isTransientDbError,
+} from "./db.js";
+import { enqueueOutbox, outboxHasPending, registerOutboxExecutor, wakeOutbox } from "./outbox.js";
 import type { MediaRef } from "./utils.js";
 
 import fsSync from "node:fs";
@@ -62,6 +71,109 @@ export interface MediaAssetRecord {
 export const inMemoryAssetStore = new Map<string, MediaAssetRecord>();
 export const inMemoryEntityMediaMap = new Map<string, string[]>();
 
+/**
+ * Recency guard for in-memory media links: entries written via setEntityMedia
+ * are trusted for a short window (fast immediate UI feedback); after that the
+ * DB link table is authoritative again and stale cache entries are ignored.
+ */
+const MEDIA_WRITE_FRESH_MS = 15_000;
+const gMedia = globalThis as typeof globalThis & { __rhRecentMediaWrites?: Map<string, number> };
+gMedia.__rhRecentMediaWrites ??= new Map<string, number>();
+const recentMediaWrites = gMedia.__rhRecentMediaWrites;
+
+function touchMediaWrite(entityKey: string): void {
+  recentMediaWrites.set(entityKey, Date.now());
+}
+
+function isFreshMediaWrite(entityKey: string): boolean {
+  const at = recentMediaWrites.get(entityKey);
+  return at !== undefined && Date.now() - at < MEDIA_WRITE_FRESH_MS;
+}
+
+/** Persist a MediaAsset row; awaits the DB (10s) or queues durably on failure. */
+async function persistAsset(data: {
+  filename: string;
+  originalName: string;
+  mimeType: string;
+  kind: "IMAGE" | "VIDEO";
+  sizeInBytes: number;
+  url: string;
+}): Promise<void> {
+  const op = { module: "media", action: "asset", key: `asset:${data.filename}`, payload: data };
+  if (outboxHasPending("media") || isDbOnCooldown()) {
+    enqueueOutbox(op);
+    return;
+  }
+  try {
+    await withDbTimeout(prisma.mediaAsset.create({ data }), DB_WRITE_MS);
+    reportDbSuccess();
+    wakeOutbox();
+  } catch (err) {
+    if (isTransientDbError(err)) reportDbError(err);
+    enqueueOutbox(op);
+  }
+}
+
+/** Shared transaction used by both live writes and outbox replay. */
+async function applyEntityMedia(
+  entityType: EntityType,
+  entityId: string,
+  unique: string[],
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.mediaLink.deleteMany({ where: { entityType, entityId } });
+    if (unique.length) {
+      // Find existing DB assets by either id or filename
+      const existingAssets = await tx.mediaAsset.findMany({
+        where: {
+          OR: [
+            { id: { in: unique } },
+            { filename: { in: unique } },
+          ],
+        },
+        select: { id: true, filename: true },
+      });
+      const assetByFilename = new Map(existingAssets.map((a) => [a.filename, a.id]));
+      const validIds = new Set(existingAssets.map((a) => a.id));
+
+      const toInsert: Array<{ entityType: string; entityId: string; mediaId: string; sortOrder: number }> = [];
+      for (let i = 0; i < unique.length; i++) {
+        const mId = unique[i];
+        let resolvedId = validIds.has(mId) ? mId : assetByFilename.get(mId);
+        if (!resolvedId) {
+          const clean = mId.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
+          const mem = inMemoryAssetStore.get(mId) || inMemoryAssetStore.get(clean);
+          if (mem) {
+            try {
+              const created = await tx.mediaAsset.create({
+                data: {
+                  filename: mem.filename || clean,
+                  originalName: mem.originalName || clean,
+                  mimeType: mem.mimeType || "image/webp",
+                  kind: mem.kind || "IMAGE",
+                  sizeInBytes: mem.sizeInBytes || 2048,
+                  url: mem.url || `/api/media/${clean}`,
+                },
+              });
+              resolvedId = created.id;
+              validIds.add(created.id);
+              assetByFilename.set(created.filename, created.id);
+            } catch {
+              // ignore collision
+            }
+          }
+        }
+        if (resolvedId) {
+          toInsert.push({ entityType, entityId, mediaId: resolvedId, sortOrder: i });
+        }
+      }
+      if (toInsert.length) {
+        await tx.mediaLink.createMany({ data: toInsert });
+      }
+    }
+  });
+}
+
 export function registerAssetInMemory(asset: MediaAssetRecord): void {
   inMemoryAssetStore.set(asset.id, asset);
   if (asset.filename) {
@@ -102,29 +214,14 @@ export async function saveUploadFile(file: UploadedFile): Promise<MediaAssetReco
     inMemoryAssetStore.set(`media-${Date.now()}-${hashPart}`, assetRecord);
     inMemoryAssetStore.set(`${Date.now()}-${hashPart}`, assetRecord);
 
-    if (!isDbOnCooldown()) {
-      withDbTimeout(
-        prisma.mediaAsset.create({
-          data: {
-            filename,
-            originalName: file.originalname,
-            mimeType: "image/webp",
-            kind: "IMAGE",
-            sizeInBytes: processed.length,
-            url: `/api/media/${filename}`,
-          },
-        }),
-        2000,
-      )
-        .then((created) => {
-          registerAssetInMemory(created as MediaAssetRecord);
-          inMemoryAssetStore.set(created.id, created as MediaAssetRecord);
-        })
-        .catch((dbErr) => {
-          reportDbError(dbErr);
-          console.warn("[media] Background DB insert for image skipped:", dbErr instanceof Error ? dbErr.message : dbErr);
-        });
-    }
+    await persistAsset({
+      filename,
+      originalName: file.originalname,
+      mimeType: "image/webp",
+      kind: "IMAGE",
+      sizeInBytes: processed.length,
+      url: `/api/media/${filename}`,
+    });
     return assetRecord;
   }
 
@@ -151,29 +248,14 @@ export async function saveUploadFile(file: UploadedFile): Promise<MediaAssetReco
     inMemoryAssetStore.set(`media-${Date.now()}-${hashPart}`, assetRecord);
     inMemoryAssetStore.set(`${Date.now()}-${hashPart}`, assetRecord);
 
-    if (!isDbOnCooldown()) {
-      withDbTimeout(
-        prisma.mediaAsset.create({
-          data: {
-            filename,
-            originalName: file.originalname,
-            mimeType: file.mimetype,
-            kind: "VIDEO",
-            sizeInBytes: buf.length,
-            url: `/api/media/${filename}`,
-          },
-        }),
-        2000,
-      )
-        .then((created) => {
-          registerAssetInMemory(created as MediaAssetRecord);
-          inMemoryAssetStore.set(created.id, created as MediaAssetRecord);
-        })
-        .catch((dbErr) => {
-          reportDbError(dbErr);
-          console.warn("[media] Background DB insert for video skipped:", dbErr instanceof Error ? dbErr.message : dbErr);
-        });
-    }
+    await persistAsset({
+      filename,
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+      kind: "VIDEO",
+      sizeInBytes: buf.length,
+      url: `/api/media/${filename}`,
+    });
     return assetRecord;
   }
   throw new Error(`Unsupported file type: ${file.mimetype || "unknown"}. Upload an image or an MP4/WebM video.`);
@@ -188,7 +270,7 @@ export async function mediaMapFor(entityType: EntityType, ids: string[]): Promis
   for (const id of ids) {
     const key = `${entityType}:${id}`;
     const mediaIds = inMemoryEntityMediaMap.get(key);
-    if (mediaIds && mediaIds.length > 0) {
+    if (mediaIds && mediaIds.length > 0 && isFreshMediaWrite(key)) {
       const refs: MediaRef[] = [];
       for (const mId of mediaIds) {
         const clean = mId.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
@@ -216,7 +298,7 @@ export async function mediaMapFor(entityType: EntityType, ids: string[]): Promis
           include: { media: true },
           orderBy: { sortOrder: "asc" },
         }),
-        1500,
+        DB_WRITE_MS,
       );
       for (const r of rows) {
         const list = map.get(r.entityId) ?? [];
@@ -226,7 +308,7 @@ export async function mediaMapFor(entityType: EntityType, ids: string[]): Promis
         registerAssetInMemory(r.media as MediaAssetRecord);
       }
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
       console.warn(`[media] DB read for ${entityType} media links skipped:`, err instanceof Error ? err.message : err);
     }
   }
@@ -249,81 +331,42 @@ export async function withMedia<T extends { id: string }>(
 export async function setEntityMedia(entityType: EntityType, entityId: string, mediaIds: string[]) {
   const normalized = mediaIds.map((m) => m.replace(/^disk-\d+-/, "").replace(/^disk-/, ""));
   const unique = Array.from(new Set(normalized));
-  // Update in-memory mapping immediately
-  inMemoryEntityMediaMap.set(`${entityType}:${entityId}`, unique);
+  const entityKey = `${entityType}:${entityId}`;
+  // Update in-memory mapping immediately (DUPLICATE cleans like `media-` ids kept out of links)
+  inMemoryEntityMediaMap.set(entityKey, unique);
+  touchMediaWrite(entityKey);
 
-  if (!isDbOnCooldown()) {
-    try {
-      await withDbTimeout(
-        prisma.$transaction(async (tx) => {
-          await tx.mediaLink.deleteMany({ where: { entityType, entityId } });
-          if (unique.length) {
-            // Find existing DB assets by either id or filename
-            const existingAssets = await tx.mediaAsset.findMany({
-              where: {
-                OR: [
-                  { id: { in: unique } },
-                  { filename: { in: unique } },
-                ],
-              },
-              select: { id: true, filename: true },
-            });
-            const assetByFilename = new Map(existingAssets.map((a) => [a.filename, a.id]));
-            const validIds = new Set(existingAssets.map((a) => a.id));
-
-            const toInsert: Array<{ entityType: string; entityId: string; mediaId: string; sortOrder: number }> = [];
-            for (let i = 0; i < unique.length; i++) {
-              const mId = unique[i];
-              let resolvedId = validIds.has(mId) ? mId : assetByFilename.get(mId);
-              if (!resolvedId) {
-                const clean = mId.replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
-                const mem = inMemoryAssetStore.get(mId) || inMemoryAssetStore.get(clean);
-                if (mem) {
-                  try {
-                    const created = await tx.mediaAsset.create({
-                      data: {
-                        filename: mem.filename || clean,
-                        originalName: mem.originalName || clean,
-                        mimeType: mem.mimeType || "image/webp",
-                        kind: mem.kind || "IMAGE",
-                        sizeInBytes: mem.sizeInBytes || 2048,
-                        url: mem.url || `/api/media/${clean}`,
-                      },
-                    });
-                    resolvedId = created.id;
-                    validIds.add(created.id);
-                    assetByFilename.set(created.filename, created.id);
-                  } catch {
-                    // ignore collision
-                  }
-                }
-              }
-              if (resolvedId) {
-                toInsert.push({ entityType, entityId, mediaId: resolvedId, sortOrder: i });
-              }
-            }
-            if (toInsert.length) {
-              await tx.mediaLink.createMany({ data: toInsert });
-            }
-          }
-        }),
-        2500,
-      );
-    } catch (err) {
-      reportDbError(err);
-      console.warn(`[media] setEntityMedia(${entityType}, ${entityId}) DB transaction failed:`, err instanceof Error ? err.message : err);
-    }
+  const op = { module: "media", action: "link", key: `link:${entityType}:${entityId}`, payload: { entityType, entityId, mediaIds: unique } };
+  if (outboxHasPending("media") || isDbOnCooldown()) {
+    enqueueOutbox(op);
+    return;
+  }
+  try {
+    await withDbTimeout(applyEntityMedia(entityType, entityId, unique), DB_WRITE_MS);
+    reportDbSuccess();
+    wakeOutbox();
+  } catch (err) {
+    if (isTransientDbError(err)) reportDbError(err);
+    enqueueOutbox(op);
   }
 }
 
 export async function clearEntityMedia(entityType: EntityType, entityId: string) {
-  inMemoryEntityMediaMap.delete(`${entityType}:${entityId}`);
-  if (!isDbOnCooldown()) {
-    try {
-      await withDbTimeout(prisma.mediaLink.deleteMany({ where: { entityType, entityId } }), 2000);
-    } catch (err) {
-      reportDbError(err);
-    }
+  const entityKey = `${entityType}:${entityId}`;
+  inMemoryEntityMediaMap.delete(entityKey);
+  touchMediaWrite(entityKey);
+  const op = { module: "media", action: "clearLink", key: `link:${entityType}:${entityId}`, payload: { entityType, entityId } };
+  if (outboxHasPending("media") || isDbOnCooldown()) {
+    enqueueOutbox(op);
+    return;
+  }
+  try {
+    await withDbTimeout(prisma.mediaLink.deleteMany({ where: { entityType, entityId } }), DB_WRITE_MS);
+    reportDbSuccess();
+    wakeOutbox();
+  } catch (err) {
+    if (isTransientDbError(err)) reportDbError(err);
+    enqueueOutbox(op);
   }
 }
 
@@ -337,3 +380,70 @@ export async function deleteAssetFile(asset: { filename: string; url: string }) 
 
 export const cover = (media: MediaRef[] | undefined): MediaRef | undefined =>
   media?.find((m) => m.kind === "IMAGE") ?? media?.[0];
+
+// ---------------------------------------------------------------------------
+// Durable outbox replay for media writes
+// ---------------------------------------------------------------------------
+registerOutboxExecutor("media", async (op) => {
+  const payload = (op.payload ?? {}) as {
+    entityType?: EntityType;
+    entityId?: string;
+    mediaIds?: string[];
+    filename?: string;
+    originalName?: string;
+    mimeType?: string;
+    kind?: "IMAGE" | "VIDEO";
+    sizeInBytes?: number;
+    url?: string;
+  };
+
+  if (op.action === "asset") {
+    const data = {
+      filename: String(payload.filename ?? ""),
+      originalName: String(payload.originalName ?? ""),
+      mimeType: String(payload.mimeType ?? "image/webp"),
+      kind: (payload.kind ?? "IMAGE") as "IMAGE" | "VIDEO",
+      sizeInBytes: Number(payload.sizeInBytes ?? 2048),
+      url: String(payload.url ?? "/api/media/"),
+    };
+    if (!data.filename) return;
+    try {
+      await withDbTimeout(prisma.mediaAsset.create({ data }), DB_WRITE_MS);
+    } catch (err: any) {
+      if (err?.code === "P2002") return; // asset row already exists — dedupe retains it
+      throw err;
+    }
+    return;
+  }
+
+  if (op.action === "link") {
+    if (!payload.entityType || !payload.entityId || !Array.isArray(payload.mediaIds)) return;
+    await withDbTimeout(
+      applyEntityMedia(payload.entityType, payload.entityId, payload.mediaIds.map(String)),
+      DB_WRITE_MS,
+    );
+    return;
+  }
+
+  if (op.action === "clearLink") {
+    if (!payload.entityType || !payload.entityId) return;
+    await withDbTimeout(
+      prisma.mediaLink.deleteMany({ where: { entityType: payload.entityType, entityId: payload.entityId } }),
+      DB_WRITE_MS,
+    );
+    return;
+  }
+
+  if (op.action === "delete") {
+    const id = String((op.payload as { id?: string })?.id ?? "").replace(/^disk-\d+-/, "").replace(/^disk-/, "").replace(/^media-/, "");
+    if (!id) return;
+    // Asset row may exist under the bare id, filename, or a media- alias.
+    await withDbTimeout(
+      prisma.mediaAsset.deleteMany({
+        where: { OR: [{ id }, { filename: id }] },
+      }),
+      DB_WRITE_MS,
+    );
+    return;
+  }
+});

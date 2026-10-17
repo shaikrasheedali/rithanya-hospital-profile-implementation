@@ -1,15 +1,23 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
-import { prisma, isDbOnCooldown, reportDbError } from "../db.js";
+import {
+  prisma,
+  isDbOnCooldown,
+  reportDbError,
+  reportDbSuccess,
+  withDbTimeout,
+  DB_READ_MS,
+  isTransientDbError,
+} from "../db.js";
 import {
   audit,
   getSessionFromReq,
   hashPassword,
+  invalidateUserSession,
   signSession,
   verifyPassword,
   SESSION_COOKIE,
   sessionCookieOptions,
-  DEMO_ACCOUNTS,
   loadUser,
 } from "../auth.js";
 
@@ -22,7 +30,25 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+/** Per identity+IP failure tracking with hard lockout and bounded memory. */
 const failLimiter = new Map<string, { n: number; first: number }>();
+const FAIL_WINDOW_MS = 10 * 60 * 1000;
+const FAIL_LIMIT = 15;
+const FAIL_MAP_CAP = 10_000;
+
+function recordFailure(key: string, now: number): void {
+  if (failLimiter.size >= FAIL_MAP_CAP && !failLimiter.has(key)) {
+    // Simple eviction: clear expired entries first.
+    for (const [k, v] of failLimiter) {
+      if (now - v.first > FAIL_WINDOW_MS) failLimiter.delete(k);
+      if (failLimiter.size < FAIL_MAP_CAP * 0.9) break;
+    }
+    if (failLimiter.size >= FAIL_MAP_CAP) failLimiter.clear();
+  }
+  const e = failLimiter.get(key);
+  if (!e || now - e.first > FAIL_WINDOW_MS) failLimiter.set(key, { n: 1, first: now });
+  else e.n += 1;
+}
 
 router.post("/login", loginLimiter, async (req, res) => {
   const { username, email, password } = req.body ?? {};
@@ -32,36 +58,29 @@ router.post("/login", loginLimiter, async (req, res) => {
     res.status(400).json({ error: "Username and password are required" });
     return;
   }
-  const key = `${req.ip}:${ident}`;
+
+  // Bootstrap password must never be accepted as a real credential.
+  const identity = ident === "rithanya@2026" || ident === "hameed@2026" ? "" : ident;
+
+  const key = `${req.ip}:${identity}`;
   const now = Date.now();
   const cur = failLimiter.get(key);
-  if (cur && now - cur.first < 10 * 60 * 1000 && cur.n >= 15) {
+  if (cur && now - cur.first < FAIL_WINDOW_MS && cur.n >= FAIL_LIMIT) {
     res.status(429).json({ error: "Too many attempts. Try again later." });
     return;
   }
 
-  const demo = DEMO_ACCOUNTS[ident];
-
-  // If DB is on cooldown/timeout, immediately authenticate using demo accounts
   if (isDbOnCooldown()) {
-    if (demo && rawPw === demo.pass) {
-      failLimiter.delete(key);
-      const token = await signSession(demo.id, demo.role);
-      res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
-      await loadUser(demo.id);
-      res.json({ ok: true, role: demo.role });
-      return;
-    }
-    res.status(401).json({
-      error: "Invalid username or password",
-    });
+    res.status(503).json({ error: "Sign-in is temporarily unavailable (database busy). Please try again in a minute." });
     return;
   }
 
   try {
-    const user = await prisma.user.findFirst({
-      where: { OR: [{ username: ident }, { email: ident }] },
-    });
+    const user = await withDbTimeout(
+      prisma.user.findFirst({ where: { OR: [{ username: identity }, { email: identity }] } }),
+      DB_READ_MS,
+    );
+    reportDbSuccess();
     const ok = user && user.isActive && (await verifyPassword(user.passwordHash, rawPw));
     if (user && ok) {
       failLimiter.delete(key);
@@ -73,41 +92,27 @@ router.post("/login", loginLimiter, async (req, res) => {
       return;
     }
 
-    // Check demo accounts as fallback
-    if (demo && rawPw === demo.pass) {
-      failLimiter.delete(key);
-      const token = await signSession(demo.id, demo.role);
-      res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
-      await loadUser(demo.id);
-      res.json({ ok: true, role: demo.role });
-      return;
-    }
-
-    const e = failLimiter.get(key);
-    if (!e || now - e.first > 10 * 60 * 1000) failLimiter.set(key, { n: 1, first: now });
-    else e.n += 1;
+    recordFailure(key, now);
     // Generic message to avoid user enumeration.
     res.status(401).json({ error: "Invalid credentials" });
   } catch (err) {
-    reportDbError(err);
-    console.warn("[auth/login] DB query failed, authenticating via demo accounts:", err instanceof Error ? err.message : err);
-    if (demo && rawPw === demo.pass) {
-      failLimiter.delete(key);
-      const token = await signSession(demo.id, demo.role);
-      res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
-      await loadUser(demo.id);
-      res.json({ ok: true, role: demo.role });
-      return;
+    if (isTransientDbError(err)) {
+      reportDbError(err);
+      console.warn("[auth/login] DB query failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ error: "Sign-in is temporarily unavailable (database busy). Please try again in a minute." });
+    } else {
+      res.status(401).json({ error: "Invalid credentials" });
     }
-    res.status(401).json({
-      error: "Invalid username or password",
-    });
   }
 });
 
 router.post("/logout", async (req, res) => {
   const user = await getSessionFromReq(req);
-  if (user) await audit({ id: user.id, fullName: user.fullName }, "LOGOUT", "User", user.id);
+  if (user) {
+    await audit({ id: user.id, fullName: user.fullName }, "LOGOUT", "User", user.id).catch(() => undefined);
+    // Drop the cached session immediately so deactivated permissions never linger.
+    invalidateUserSession(user.id);
+  }
   res.clearCookie(SESSION_COOKIE, { ...sessionCookieOptions(req), maxAge: undefined, expires: new Date(0) });
   res.json({ ok: true });
 });
@@ -124,7 +129,7 @@ router.get("/me", async (req, res) => {
 // Ensure a superadmin exists even if seed was skipped (first-run bootstrap)
 router.post("/bootstrap", async (req, res) => {
   try {
-    const count = await prisma.user.count();
+    const count = await withDbTimeout(prisma.user.count(), DB_READ_MS);
     if (count > 0) {
       res.status(403).json({ error: "Already initialized" });
       return;

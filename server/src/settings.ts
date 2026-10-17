@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { prisma, isDbOnCooldown, reportDbError, reportDbSuccess, withDbTimeout } from "./db.js";
+import { prisma, isDbOnCooldown, reportDbError, reportDbSuccess, withDbTimeout, DB_READ_MS, isTransientDbError } from "./db.js";
+import { encryptJson, decryptJson } from "./crypto.js";
 
 export const DEFAULT_ADDRESS =
   "Opposite Old LIC Office, Wyra Road, Nehru Nagar, Khammam HO, Khammam – 507001, Telangana, India";
@@ -35,7 +36,18 @@ function loadSettingsCache() {
   try {
     if (fs.existsSync(CACHE_FILE)) {
       const raw = fs.readFileSync(CACHE_FILE, "utf-8");
-      const parsed = JSON.parse(raw);
+      // New format: encrypted payload (iv:tag:cipher). Legacy: plaintext JSON (read-only migration).
+      let parsed: Record<string, unknown> | null = null;
+      try {
+        const asJson = JSON.parse(raw);
+        if (asJson && typeof asJson === "object" && !Array.isArray(asJson)) parsed = asJson;
+      } catch {
+        parsed = null;
+      }
+      if (!parsed) {
+        const dec = decryptJson<Record<string, unknown>>(raw, null as unknown as Record<string, unknown>);
+        if (dec && typeof dec === "object" && !Array.isArray(dec)) parsed = dec;
+      }
       if (parsed && typeof parsed === "object") {
         return { ...DEFAULT_SETTINGS, ...parsed };
       }
@@ -53,7 +65,8 @@ function persistSettingsCache(): void {
   try {
     const dir = path.dirname(CACHE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(cachedSettings, null, 2), "utf-8");
+    // Keep the offline cache encrypted at rest like every other upload cache.
+    fs.writeFileSync(CACHE_FILE, encryptJson(cachedSettings), "utf-8");
   } catch (err) {
     console.warn("[settings] Could not persist settings cache file:", err);
   }
@@ -67,7 +80,7 @@ export function updateCachedSettings(partial: Partial<typeof DEFAULT_SETTINGS>):
 export async function getSettings() {
   if (isDbOnCooldown()) return cachedSettings;
   try {
-    const row = await withDbTimeout(prisma.hospitalSetting.findUnique({ where: { id: "PRIMARY_CONFIG" } }), 1500);
+    const row = await withDbTimeout(prisma.hospitalSetting.findUnique({ where: { id: "PRIMARY_CONFIG" } }), DB_READ_MS);
     if (row) {
       reportDbSuccess();
       cachedSettings = { ...cachedSettings, ...row };
@@ -76,8 +89,8 @@ export async function getSettings() {
       return cachedSettings;
     }
   } catch (err) {
-    reportDbError(err);
-    console.warn("[settings] Database query timed out, using cached settings:", err instanceof Error ? err.message : err);
+    if (isTransientDbError(err)) reportDbError(err);
+    console.warn("[settings] Database query failed, using cached settings:", err instanceof Error ? err.message : err);
   }
   return cachedSettings;
 }

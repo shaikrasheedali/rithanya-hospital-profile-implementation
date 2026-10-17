@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-
-function entityHeader(): Record<string, string> {
-  try {
-    const m = typeof document !== "undefined" ? document.cookie.match(/(?:^|; )rh_entity=([^;]*)/) : null;
-    return { "x-rh-entity": m ? decodeURIComponent(m[1]) : "RITHANYA_HOSPITAL" };
-  } catch {
-    return { "x-rh-entity": "RITHANYA_HOSPITAL" };
-  }
-}
+import { entityHeader } from "@/lib/api";
 
 export function usePortalData<T>(url: string): { data: T | null; loading: boolean; error: string | null; reload: () => void } {
   const [data, setData] = useState<T | null>(null);

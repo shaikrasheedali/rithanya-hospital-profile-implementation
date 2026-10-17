@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { toast } from "sonner";
+import { entityHeader } from "@/lib/api";
 
 export async function api<T = unknown>(
   url: string,
@@ -10,11 +11,7 @@ export async function api<T = unknown>(
   body?: unknown,
 ): Promise<{ ok: boolean; data?: T; error?: string }> {
   try {
-    const entityMatch = typeof document !== "undefined" ? document.cookie.match(/(?:^|; )rh_entity=([^;]*)/) : null;
-    const entity = entityMatch ? entityMatch[1] : "RITHANYA_HOSPITAL";
-    const headers: Record<string, string> = {
-      "x-rh-entity": entity,
-    };
+    const headers: Record<string, string> = { ...entityHeader() };
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
     }

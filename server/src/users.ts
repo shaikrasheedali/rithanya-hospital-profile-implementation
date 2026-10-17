@@ -1,8 +1,26 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
-import { computeModules, hashPassword, type ModuleKey, type Role, type SessionUser } from "./auth.js";
+import {
+  prisma,
+  isDbOnCooldown,
+  reportDbError,
+  reportDbSuccess,
+  withDbTimeout,
+  DB_READ_MS,
+  DB_WRITE_MS,
+  isTransientDbError,
+} from "./db.js";
+import {
+  computeModules,
+  hashPassword,
+  invalidateUserSession,
+  type ModuleKey,
+  type Role,
+  type SessionUser,
+} from "./auth.js";
+import { encryptJson, decryptJson } from "./crypto.js";
+import { enqueueOutbox, outboxHasPending, registerOutboxExecutor, wakeOutbox } from "./outbox.js";
 
 export type StoredUser = {
   id: string;
@@ -56,21 +74,24 @@ function loadCache(): StoredUser[] {
   try {
     if (fs.existsSync(CACHE_FILE)) {
       const raw = fs.readFileSync(CACHE_FILE, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        // Enforce production superadmin and admin credentials, and purge legacy demo-staff
-        const filtered = parsed.filter((u: StoredUser) => u.id !== "demo-staff" && u.username !== "staff");
-        const sa = filtered.find((u: StoredUser) => u.username === "superadmin");
-        if (sa) {
-          sa.email = "mgrhameed@gmail.com";
-          sa.passwordHash = "$argon2id$v=19$m=65536,t=3,p=4$y9FaRbikQbjko2xdFTRBQw$mRnNdDFOHd4yrUnVEyEOPafHWNdTTG9+6Estrt+p6Ks";
+      // New format: encrypted payload. Legacy: plaintext JSON (read-only migration).
+      let parsed: unknown;
+      if (raw.startsWith("{") && raw.includes('"cipherText') === false) {
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          parsed = null;
         }
-        const adm = filtered.find((u: StoredUser) => u.username === "admin");
-        if (adm) {
-          adm.email = "admin@rithanyahospital.com";
-          adm.passwordHash = "$argon2id$v=19$m=65536,t=3,p=4$vWs3KyOUG4TCiouPGYfqLQ$f8UI7TLrpDExr4B1s7CZ9Pq/12aZ8DC14CgT44YJDIU";
-        }
-        return filtered;
+      }
+      if (!Array.isArray(parsed)) {
+        const dec = decryptJson<StoredUser[]>(raw, null as unknown as StoredUser[]);
+        parsed = Array.isArray(dec) ? dec : null;
+      }
+      if (Array.isArray(parsed) && (parsed as StoredUser[]).length > 0) {
+        // Purge legacy demo accounts; DB is the credential authority now.
+        return (parsed as StoredUser[]).filter(
+          (u) => u.id !== "demo-staff" && u.username !== "staff",
+        );
       }
     }
   } catch (err) {
@@ -83,7 +104,10 @@ function persistCache(): void {
   try {
     const dir = path.dirname(CACHE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(inMemoryUsers, null, 2), "utf-8");
+    // Encrypt the cache and strip password hashes — the DB is the credential
+    // authority and argon2 hashes must never sit in an offline readable file.
+    const withoutHashes = inMemoryUsers.map((u) => ({ ...u, passwordHash: "" }));
+    fs.writeFileSync(CACHE_FILE, encryptJson(withoutHashes), "utf-8");
   } catch (err) {
     console.warn("[users] Could not persist users cache file:", err);
   }
@@ -110,8 +134,9 @@ export async function loadUsersList(actor?: SessionUser): Promise<Array<{ id: st
         prisma.user.findMany({
           orderBy: { createdAt: "asc" },
         }),
-        2000
+        DB_READ_MS
       );
+      reportDbSuccess();
 
       for (const u of dbUsers) {
         // Skip any legacy staff from DB if not desired
@@ -121,6 +146,7 @@ export async function loadUsersList(actor?: SessionUser): Promise<Array<{ id: st
           inMemoryUsers[idx].email = u.email;
           inMemoryUsers[idx].role = u.role as Role;
           inMemoryUsers[idx].isActive = u.isActive;
+          inMemoryUsers[idx].passwordHash = u.passwordHash;
         } else {
           inMemoryUsers.push({
             id: u.id,
@@ -139,7 +165,7 @@ export async function loadUsersList(actor?: SessionUser): Promise<Array<{ id: st
       }
       persistCache();
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
       console.warn("[users] DB query failed, falling back to resilient user cache:", (err as Error)?.message || err);
     }
   }
@@ -282,44 +308,116 @@ export async function createUserRecord(
   inMemoryUsers.push(newUser);
   persistCache();
 
-  // Background DB sync if available
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.$transaction(async (tx) => {
-        await tx.user.create({
-          data: {
-            id,
-            username: rawUsername,
-            email,
-            fullName,
-            role,
-            passwordHash,
-            createdById: actor.id,
-          },
-        });
-        await tx.userModuleAccess.create({
-          data: {
-            userId: id,
-            canManageEMR: defaultModules.emr,
-            canManageBloodBank: defaultModules.bloodbank,
-            canManageCMS: defaultModules.cms,
-            canManageStore: defaultModules.store,
-            canManageHR: defaultModules.hr,
-            canManageFinance: defaultModules.finance,
-            canManageDPDP: defaultModules.dpdp,
-            canManageSettings: defaultModules.settings,
-          },
-        });
-      }),
-      3500
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[users] Background DB sync for user create failed:", err?.message || err);
-    });
-  }
+  const op = {
+    module: "users" as const,
+    action: "create" as const,
+    key: `user:${id}`,
+    payload: {
+      id,
+      username: rawUsername,
+      email,
+      fullName,
+      role,
+      passwordHash,
+      createdById: actor.id,
+      modules: defaultModules,
+    },
+  };
+  await persistUserWrite(op, () => applyUserCreate(op.payload as never));
 
   return { id };
 }
+
+function accessRowFromModules(mods: Record<ModuleKey, boolean>) {
+  return {
+    canManageEMR: mods.emr,
+    canManageBloodBank: mods.bloodbank,
+    canManageCMS: mods.cms,
+    canManageStore: mods.store,
+    canManageHR: mods.hr,
+    canManageFinance: mods.finance,
+    canManageDPDP: mods.dpdp,
+    canManageSettings: mods.settings,
+  };
+}
+
+async function applyUserCreate(p: {
+  id: string;
+  username: string;
+  email: string;
+  fullName: string;
+  role: Role;
+  passwordHash: string;
+  createdById: string;
+  modules: Record<ModuleKey, boolean>;
+}): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.user.create({
+      data: {
+        id: p.id,
+        username: p.username,
+        email: p.email,
+        fullName: p.fullName,
+        role: p.role,
+        passwordHash: p.passwordHash,
+        createdById: p.createdById,
+      },
+    });
+    await tx.userModuleAccess.create({
+      data: { userId: p.id, ...accessRowFromModules(p.modules) },
+    });
+  });
+}
+
+async function applyUserUpdate(p: { id: string; data: Record<string, unknown> }): Promise<void> {
+  await prisma.user.update({ where: { id: p.id }, data: p.data as never });
+}
+
+/** Awaited user persistence helper: DB first, durable outbox on any failure. */
+async function persistUserWrite(
+  op: { module: "users"; action: "create" | "update" | "delete" | "modules"; key: string; payload: unknown },
+  run: () => Promise<unknown>,
+): Promise<void> {
+  if (outboxHasPending("users") || isDbOnCooldown()) {
+    enqueueOutbox(op);
+    return;
+  }
+  try {
+    await withDbTimeout(run(), DB_WRITE_MS);
+    reportDbSuccess();
+    wakeOutbox();
+  } catch (err) {
+    if (isTransientDbError(err)) reportDbError(err);
+    console.warn(`[users] DB write failed (${op.action}) — queued for durable retry:`, (err as Error)?.message || err);
+    enqueueOutbox(op);
+  }
+}
+
+registerOutboxExecutor("users", async (op) => {
+  if (op.action === "create") {
+    await applyUserCreate(op.payload as never);
+    return;
+  }
+  if (op.action === "update") {
+    const p = op.payload as { id: string; data: Record<string, unknown> };
+    await prisma.user.update({ where: { id: p.id }, data: p.data as never });
+    return;
+  }
+  if (op.action === "delete") {
+    const p = op.payload as { id: string };
+    await prisma.user.delete({ where: { id: p.id } });
+    return;
+  }
+  if (op.action === "modules") {
+    const p = op.payload as { userId: string; mods: Record<ModuleKey, boolean> };
+    await prisma.userModuleAccess.upsert({
+      where: { userId: p.userId },
+      create: { userId: p.userId, ...accessRowFromModules(p.mods) },
+      update: accessRowFromModules(p.mods),
+    });
+    return;
+  }
+});
 
 export async function updateUserRecord(
   actor: SessionUser,
@@ -391,24 +489,24 @@ export async function updateUserRecord(
 
   target.updatedAt = new Date().toISOString();
   persistCache();
+  invalidateUserSession(id);
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.user.update({
-        where: { id },
-        data: {
-          fullName: target.fullName,
-          email: target.email,
-          role: target.role,
-          isActive: target.isActive,
-          passwordHash: target.passwordHash,
-        },
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-    });
-  }
+  const op = {
+    module: "users" as const,
+    action: "update" as const,
+    key: `user:${id}`,
+    payload: {
+      id,
+      data: {
+        fullName: target.fullName,
+        email: target.email,
+        role: target.role,
+        isActive: target.isActive,
+        ...(body.password ? { passwordHash: target.passwordHash } : {}),
+      },
+    },
+  };
+  await persistUserWrite(op, () => applyUserUpdate(op.payload as never));
 }
 
 export async function deleteUserRecord(actor: SessionUser, id: string): Promise<void> {
@@ -440,12 +538,15 @@ export async function deleteUserRecord(actor: SessionUser, id: string): Promise<
   const idx = inMemoryUsers.findIndex((u) => u.id === id);
   if (idx >= 0) inMemoryUsers.splice(idx, 1);
   persistCache();
+  invalidateUserSession(id);
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(prisma.user.delete({ where: { id } }), 2500).catch((err) => {
-      reportDbError(err);
-    });
-  }
+  await persistUserWrite(
+    { module: "users", action: "delete", key: `user:${id}`, payload: { id } },
+    async () => {
+      await prisma.userModuleAccess.deleteMany({ where: { userId: id } });
+      await prisma.user.delete({ where: { id } });
+    },
+  );
 }
 
 export async function updatePermissionsRecord(
@@ -500,36 +601,15 @@ export async function updatePermissionsRecord(
   target.modules = current;
   target.updatedAt = new Date().toISOString();
   persistCache();
+  invalidateUserSession(targetId);
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
+  await persistUserWrite(
+    { module: "users", action: "modules", key: `user:${targetId}`, payload: { userId: targetId, mods: current } },
+    async () =>
       prisma.userModuleAccess.upsert({
         where: { userId: targetId },
-        create: {
-          userId: targetId,
-          canManageEMR: current.emr,
-          canManageBloodBank: current.bloodbank,
-          canManageCMS: current.cms,
-          canManageStore: current.store,
-          canManageHR: current.hr,
-          canManageFinance: current.finance,
-          canManageDPDP: current.dpdp,
-          canManageSettings: false,
-        },
-        update: {
-          canManageEMR: current.emr,
-          canManageBloodBank: current.bloodbank,
-          canManageCMS: current.cms,
-          canManageStore: current.store,
-          canManageHR: current.hr,
-          canManageFinance: current.finance,
-          canManageDPDP: current.dpdp,
-          canManageSettings: false,
-        },
+        create: { userId: targetId, ...accessRowFromModules(current) },
+        update: accessRowFromModules(current),
       }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-    });
-  }
+  );
 }

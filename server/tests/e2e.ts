@@ -158,7 +158,7 @@ async function main() {
       ok((await req("POST", "/api/public/appointments", { body: {} })).status === 400, "appointment empty 400");
       const badSource = await req("POST", "/api/public/appointments", { body: { fullName: "E2E Src", phone: "9000000098", source: "HACK" } });
       ok(badSource.status === 200, "appointment bad source defaults WEBSITE", badSource.status);
-      const sup = await login("superadmin", "Rithanya@2026");
+      const sup = await login("superadmin", "Hameed@2026");
       const list = await req("GET", "/api/portal/appointments", { jar: sup });
       const hit = ((list.json as { items: Array<{ id: string; fullName: string }> }).items ?? []).find((a) => a.fullName === "E2E Visitor");
       ok(!!hit, "appointment persisted, visible in portal");
@@ -166,9 +166,19 @@ async function main() {
     }
 
     /* ---------- auth ---------- */
-    const sup = await login("superadmin", "Rithanya@2026");
-    const adm = await login("admin", "Admin@2026");
-    const stf = await login("staff", "Staff@2026");
+    // Real database credentials only — the legacy demo accounts were removed.
+    const sup = await login("superadmin", "Hameed@2026");
+    const adm = await login("admin", "Rithanya@2026");
+    // Staff accounts are created by admins through the API (first-use seeding
+    // no longer ships a pre-created staff login).
+    const stfUsername = `e2e_staff_${Date.now()}`;
+    const stfRes = await req("POST", "/api/portal/r/users", {
+      jar: sup,
+      body: { username: stfUsername, email: `${stfUsername}@x.com`, fullName: "E2E Staff", role: "STAFF", password: "E2eStaff@2026" },
+    });
+    ok(stfRes.status === 200, "staff account create 200 (API-created staff)", stfRes.text);
+    const stfId = (stfRes.json as { data?: { id?: string } }).data?.id ?? "";
+    const stf = await login(stfUsername, "E2eStaff@2026");
     {
       ok((await req("POST", "/api/auth/login", { body: { username: "superadmin", password: "wrong" } })).status === 401, "login wrong pw 401");
       ok((await req("POST", "/api/auth/login", { body: { username: "ghost", password: "whatever123" } })).status === 401, "login unknown 401");
@@ -221,11 +231,12 @@ async function main() {
       ok((await req("PUT", `/api/portal/r/patients/${patientId}`, { jar: sup, body: { age: 31 } })).status === 200, "patient update 200");
       ok((await req("POST", `/api/portal/r/patients/${patientId}`, { jar: sup, body: { action: "vitals", haemoglobin: 0, spO2: 98, pulse: 80, bpSystolic: 120, bpDiastolic: 80 } })).status === 400, "vitals bad hb 400");
       ok((await req("POST", "/api/portal/r/patients/00000000-0000-0000-0000-000000000000", { jar: sup, body: { action: "vitals", haemoglobin: 12, spO2: 98, pulse: 80, bpSystolic: 120, bpDiastolic: 80 } })).status === 404, "vitals bogus patient 404");
-      ok((await req("POST", `/api/portal/r/patients/${patientId}`, { jar: sup, body: { action: "vitals", haemoglobin: 12.5, spO2: 98, pulse: 80, bpSystolic: 120, bpDiastolic: 80, clinicalNotes: "e2e" } })).status === 200, "vitals valid 200");
+      ok((await req("POST", `/api/portal/r/patients/${patientId}`, { jar: sup, body: { action: "vitals", haemoglobin: 12.5, spO2: 98, pulse: 80, bpSystolic: 120, bpDiastolic: 80, clinicalNotes: "e2e", timeSlot: "Night" } })).status === 200, "vitals valid 200");
       ok((await req("POST", `/api/portal/r/patients/${patientId}`, { jar: sup, body: { action: "nope" } })).status === 400, "patient unknown action 400");
       const plist = await req("GET", "/api/portal/patients?type=OUTPATIENT", { jar: sup });
-      const row = ((plist.json as { patients: Array<{ id: string; fullName: string; consentPhotoUrl: string | null; vitals: unknown[] }> }).patients ?? []).find((p) => p.id === patientId);
+      const row = ((plist.json as { patients: Array<{ id: string; fullName: string; consentPhotoUrl: string | null; vitals: Array<{ timeSlot?: string }> }> }).patients ?? []).find((p) => p.id === patientId);
       ok(!!row && row.fullName === "E2E Patient" && row.vitals.length === 1, "patient decrypted + vitals in list", row);
+      ok(row?.vitals[0]?.timeSlot === "Night", "vital timeSlot persisted and returned", row?.vitals[0]?.timeSlot);
       if (row?.consentPhotoUrl) {
         const file = row.consentPhotoUrl.split("/").pop()!;
         const cf = await req("GET", `/api/portal/consent/${file}`, { jar: stf });
@@ -255,10 +266,20 @@ async function main() {
     {
       ok((await req("POST", "/api/portal/r/bloodbank", { jar: sup, body: {} })).status === 400, "bloodbank empty 400");
       ok((await req("POST", "/api/portal/r/bloodbank", { jar: sup, body: { stocks: [{ bloodGroup: "Z", wholeBloodUnits: 1, plasmaUnits: 1 }] } })).status === 400, "bloodbank bad group 400");
+      // Legacy bare groups ("O"/"A"/"B"/"AB") were the historical bug — only the
+      // 8 canonical groups are accepted now.
+      ok((await req("POST", "/api/portal/r/bloodbank", { jar: sup, body: { stocks: [{ bloodGroup: "O", wholeBloodUnits: 1, plasmaUnits: 1 }] } })).status === 400, "bloodbank legacy bare group 400");
       ok((await req("POST", "/api/portal/r/bloodbank", { jar: sup, body: { stocks: [{ bloodGroup: "O", wholeBloodUnits: -1, plasmaUnits: 0 }] } })).status === 400, "bloodbank negative 400");
-      ok((await req("POST", "/api/portal/r/bloodbank", { jar: sup, body: { stocks: [{ bloodGroup: "O", wholeBloodUnits: 14, plasmaUnits: 9 }, { bloodGroup: "A", wholeBloodUnits: 11, plasmaUnits: 7 }, { bloodGroup: "B", wholeBloodUnits: 9, plasmaUnits: 6 }, { bloodGroup: "AB", wholeBloodUnits: 4, plasmaUnits: 3 }] } })).status === 200, "bloodbank bulk 200");
+      const CANON = ["O+", "A+", "B+", "AB+", "O-", "A-", "B-", "AB-"];
+      const bulk = await req("POST", "/api/portal/r/bloodbank", {
+        jar: sup,
+        body: { stocks: CANON.map((g, i) => ({ bloodGroup: g, wholeBloodUnits: 14 - i, plasmaUnits: 9 - i })) },
+      });
+      ok(bulk.status === 200, "bloodbank canonical bulk 200", bulk.text);
       const bb = await req("GET", "/api/portal/blood-stock", { jar: sup });
       ok(bb.status === 200 && typeof (bb.json as { threshold?: number }).threshold === "number", "portal blood-stock 200", bb.status);
+      const bbGroups = ((bb.json as { stock?: Array<{ bloodGroup?: string }> }).stock ?? []).map((r) => r.bloodGroup);
+      ok(JSON.stringify(bbGroups) === JSON.stringify(CANON), "portal blood-stock canonical 8 in order", bbGroups);
     }
 
     /* ---------- public orders + portal cancel (stock restore) ---------- */
@@ -471,6 +492,8 @@ async function main() {
       ok((await req("PUT", `/api/portal/r/permissions/${myId}`, { jar: sup, body: { modules: {} } })).status === 403, "self permissions 403");
       ok((await req("PUT", `/api/portal/r/permissions/${uid}`, { jar: adm, body: { modules: {} } })).status === 200, "admin permissions staff 200");
       ok((await req("DELETE", `/api/portal/r/users/${uid}`, { jar: sup })).status === 200, "user delete 200");
+      // Remove the API-created staff account so test data does not linger.
+      ok(stfId === "" || (await req("DELETE", `/api/portal/r/users/${stfId}`, { jar: sup })).status === 200, "e2e staff account cleanup 200");
       ok((await req("PUT", "/api/portal/r/settings/x", { jar: sup, body: {} })).status === 400, "settings empty 400");
       ok((await req("PUT", "/api/portal/r/settings/x", { jar: sup, body: { canonicalUrl: "not-a-url" } })).status === 400, "settings bad url 400");
       ok((await req("PUT", "/api/portal/r/settings/x", { jar: sup, body: { noticeBanner: "E2E banner — all systems verified" } })).status === 200, "settings update 200");

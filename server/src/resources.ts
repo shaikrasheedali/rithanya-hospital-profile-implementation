@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import fs from "node:fs/promises";
 import sharp from "sharp";
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
+import { prisma, isDbOnCooldown, reportDbError, reportDbSuccess, withDbTimeout, DB_WRITE_MS, isTransientDbError } from "./db.js";
 import { audit, computeModules, hashPassword, type ModuleKey, type Role, type SessionUser } from "./auth.js";
 import { decryptField, encryptField, encryptJson } from "./crypto.js";
 import { PRIVATE_DIR } from "./media.js";
@@ -44,7 +44,8 @@ import {
   deleteUserRecord,
   updatePermissionsRecord,
 } from "./users.js";
-import { savePayrollRecord } from "./payrollStore.js";
+import { savePayrollRecord, deletePayrollRecord } from "./payrollStore.js";
+import { enqueueOutbox, outboxHasPending, registerOutboxExecutor, wakeOutbox } from "./outbox.js";
 
 export class ApiError extends Error {
   constructor(message: string, public status = 400) {
@@ -266,46 +267,97 @@ const patients: Handler = {
   },
 };
 
+const CANONICAL_BLOOD_GROUPS = ["O+", "A+", "B+", "AB+", "O-", "A-", "B-", "AB-"] as const;
+
 const bloodbank: Handler = {
   module: "bloodbank",
   async create({ user, body }) {
     const stocks = Array.isArray(body.stocks) ? body.stocks : [];
     if (!stocks.length) throw new ApiError("No stock values supplied");
+
     const colors: Record<string, string> = { O: "SKY_BLUE", A: "YELLOW", B: "RED", AB: "WHITE" };
+    const values: Array<{ bloodGroup: string; wholeBloodUnits: number; packedCellsUnits: number; plasmaUnits: number }> = [];
+    for (const s of stocks) {
+      const g = oneOf(s.bloodGroup, CANONICAL_BLOOD_GROUPS, "blood group");
+      const wb = num(s.wholeBloodUnits, "Whole blood units", { min: 0, max: 9999 })!;
+      const pc = num(s.packedCellsUnits, "Packed cells (PRBC) units", { min: 0, max: 9999 }) ?? 0;
+      const pl = num(s.plasmaUnits, "Plasma units", { min: 0, max: 9999 })!;
+      values.push({ bloodGroup: g, wholeBloodUnits: wb, packedCellsUnits: pc, plasmaUnits: pl });
+    }
+
     // Update in-memory stock immediately for instantaneous public reflect
-    updateInMemoryBloodStock(stocks);
-    if (!isDbOnCooldown()) {
+    updateInMemoryBloodStock(values);
+
+    // Persist with outbox fallback so stock edits are never silently lost
+    const op = {
+      module: "bloodstock",
+      action: "upsert",
+      key: "bloodstock:batch",
+      payload: { values },
+    };
+    if (outboxHasPending("bloodstock") || isDbOnCooldown()) {
+      enqueueOutbox(op);
+    } else {
       try {
-        for (const s of stocks) {
-          const g = oneOf(s.bloodGroup, ["O", "A", "B", "AB", "O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"] as const, "blood group");
-          const wb = num(s.wholeBloodUnits, "Whole blood units", { min: 0, max: 9999 })!;
-          const pc = num(s.packedCellsUnits, "Packed cells (PRBC) units", { min: 0, max: 9999 }) ?? 0;
-          const pl = num(s.plasmaUnits, "Plasma units", { min: 0, max: 9999 })!;
-          const cat = g.replace(/[+-]/g, "");
-          await withDbTimeout(
-            prisma.bloodStock.upsert({
-              where: { bloodGroup: g },
-              create: { bloodGroup: g, groupCategory: cat, colorCode: colors[cat] ?? "WHITE", wholeBloodUnits: wb, packedCellsUnits: pc, plasmaUnits: pl },
-              update: { wholeBloodUnits: wb, packedCellsUnits: pc, plasmaUnits: pl, lastUpdated: new Date() },
-            }),
-            1500,
-          );
-        }
+        await withDbTimeout(applyBloodStockUpsert(values, colors), DB_WRITE_MS);
+        reportDbSuccess();
+        // Legacy bare-group rows ("O", "A", "B", "AB") are never valid; prune them.
+        await withDbTimeout(
+          prisma.bloodStock.deleteMany({ where: { bloodGroup: { in: ["O", "A", "B", "AB"] } } }),
+          DB_WRITE_MS,
+        ).catch(() => undefined);
+        wakeOutbox();
       } catch (err) {
-        reportDbError(err);
-        console.warn("[resources:bloodbank] DB upsert skipped:", err instanceof Error ? err.message : err);
+        if (isTransientDbError(err)) reportDbError(err);
+        console.warn("[resources:bloodbank] DB upsert failed — queued for durable retry:", (err as Error)?.message || err);
+        enqueueOutbox(op);
       }
     }
+
     await audit(
       user,
       "UPDATE_BLOOD_STOCK",
       "BloodStock",
       null,
-      stocks.map((s: any) => `${s.bloodGroup}: WB=${s.wholeBloodUnits}, PC=${s.packedCellsUnits ?? 0}, FFP=${s.plasmaUnits}`).join(" | "),
+      values.map((s) => `${s.bloodGroup}: WB=${s.wholeBloodUnits}, PC=${s.packedCellsUnits}, FFP=${s.plasmaUnits}`).join(" | "),
     );
     return { ok: true };
   },
 };
+
+async function applyBloodStockUpsert(
+  values: Array<{ bloodGroup: string; wholeBloodUnits: number; packedCellsUnits: number; plasmaUnits: number }>,
+  colors: Record<string, string>,
+): Promise<void> {
+  for (const s of values) {
+    const cat = s.bloodGroup.replace(/[+-]/g, "");
+    await prisma.bloodStock.upsert({
+      where: { bloodGroup: s.bloodGroup },
+      create: {
+        bloodGroup: s.bloodGroup,
+        groupCategory: cat,
+        colorCode: colors[cat] ?? "WHITE",
+        wholeBloodUnits: s.wholeBloodUnits,
+        packedCellsUnits: s.packedCellsUnits,
+        plasmaUnits: s.plasmaUnits,
+      },
+      update: {
+        wholeBloodUnits: s.wholeBloodUnits,
+        packedCellsUnits: s.packedCellsUnits,
+        plasmaUnits: s.plasmaUnits,
+        lastUpdated: new Date(),
+      },
+    });
+  }
+}
+
+// Durable outbox replay for blood stock edits
+registerOutboxExecutor("bloodstock", async (op) => {
+  if (op.action !== "upsert") return;
+  const payload = op.payload as { values: Array<{ bloodGroup: string; wholeBloodUnits: number; packedCellsUnits: number; plasmaUnits: number }> };
+  const colors: Record<string, string> = { O: "SKY_BLUE", A: "YELLOW", B: "RED", AB: "WHITE" };
+  await applyBloodStockUpsert(payload.values, colors);
+});
 
 const orders: Handler = {
   module: "store",
@@ -416,6 +468,12 @@ const payroll: Handler = {
     return row;
   },
   async remove({ user, id }) {
+    try {
+      await deletePayrollRecord(id!);
+    } catch (e: any) {
+      if (e?.message === "Payroll record not found") throw new ApiError("Payroll record not found", 404);
+      throw new ApiError(e?.message || "Payroll deletion failed", 400);
+    }
     await audit(user, "DELETE_PAYROLL", "PayrollRecord", id);
     return { ok: true };
   },
@@ -684,7 +742,10 @@ const settings: Handler = {
     if (has("socialShareThumbnailUrl")) partial.socialShareThumbnailUrl = str(body.socialShareThumbnailUrl, 400) || null;
     if (!Object.keys(partial).length) throw new ApiError("Nothing to update");
     updateCachedSettings(partial);
-    if (!isDbOnCooldown()) {
+    const op = { module: "settings", action: "upsert", key: "settings:PRIMARY_CONFIG", payload: partial };
+    if (outboxHasPending("settings") || isDbOnCooldown()) {
+      enqueueOutbox(op);
+    } else {
       try {
         await withDbTimeout(
           prisma.hospitalSetting.upsert({
@@ -692,11 +753,14 @@ const settings: Handler = {
             create: { ...DEFAULT_SETTINGS, ...partial },
             update: partial as never,
           }),
-          2000,
+          DB_WRITE_MS,
         );
+        reportDbSuccess();
+        wakeOutbox();
       } catch (err) {
-        reportDbError(err);
-        console.warn("[resources:settings] DB upsert skipped:", err instanceof Error ? err.message : err);
+        if (isTransientDbError(err)) reportDbError(err);
+        console.warn("[resources:settings] DB upsert failed — queued for durable retry:", err instanceof Error ? err.message : err);
+        enqueueOutbox(op);
       }
     }
     await audit(user, "UPDATE_SETTINGS", "HospitalSetting", "PRIMARY_CONFIG", Object.keys(partial).join(", "));
@@ -704,16 +768,28 @@ const settings: Handler = {
   },
 };
 
+// Durable outbox replay for hospital settings
+registerOutboxExecutor("settings", async (op) => {
+  if (op.action !== "upsert") return;
+  const partial = op.payload as Record<string, unknown>;
+  if (!Object.keys(partial).length) return;
+  await prisma.hospitalSetting.upsert({
+    where: { id: "PRIMARY_CONFIG" },
+    create: { ...DEFAULT_SETTINGS, ...partial },
+    update: partial as never,
+  });
+});
+
 const appointments: Handler = {
   module: "emr",
   async update({ user, body, id }) {
     const status = oneOf(body.status, ["NEW", "CONFIRMED", "COMPLETED", "CANCELLED"] as const, "status");
-    await prisma.appointment.update({ where: { id: id! }, data: { status } });
+    await withDbTimeout(prisma.appointment.update({ where: { id: id! }, data: { status } }), DB_WRITE_MS);
     await audit(user, "APPOINTMENT_STATUS", "Appointment", id, status);
     return { ok: true };
   },
   async remove({ user, id }) {
-    await prisma.appointment.delete({ where: { id: id! } });
+    await withDbTimeout(prisma.appointment.delete({ where: { id: id! } }), DB_WRITE_MS);
     await audit(user, "DELETE_APPOINTMENT", "Appointment", id);
     return { ok: true };
   },

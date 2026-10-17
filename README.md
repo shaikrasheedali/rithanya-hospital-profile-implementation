@@ -46,13 +46,18 @@ When deploying on GoDaddy Node.js hosting, database secrets are injected automat
 - `DB_USER`
 - `DB_PASSWORD`
 
-The server automatically maps these into the database connection string and utilizes `mysql2/promise` alongside Prisma driver adapter.
+The server automatically maps these into the database connection string and utilizes Prisma driver adapters (`mariadb` adapter for MySQL/MariaDB). Writes are durable: when the database is briefly unreachable, operations are queued in an encrypted on-disk outbox (`server/uploads/outbox.json`) and replayed automatically after reconnection — admin edits are permanent until changed again.
 
-## Demo logins (seeded)
+## Login accounts (seeded on first install)
 
-- Superadmin: `superadmin` / `Rithanya@2026`
-- Admin: `admin` / `Admin@2026`
-- Staff: `staff` / `Staff@2026`
+- Superadmin: `superadmin` / `Hameed@2026`
+- Admin: `admin` / `Rithanya@2026`
+
+Staff accounts have no seeded password — create them from the admin portal
+(**Access → Users → New user**, role `STAFF`). Passwords are change-policy
+friendly: superadmin and admin can reset any password from the same screen.
+Please change these first-install passwords before going live, and set strong
+`JWT_SECRET` / `ENCRYPTION_MASTER_KEY` values in production (64 hex chars).
 
 ## Production deploy
 

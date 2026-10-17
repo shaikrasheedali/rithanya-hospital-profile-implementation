@@ -1,4 +1,4 @@
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
+import { prisma, isDbOnCooldown, reportDbError, reportDbSuccess, withDbTimeout, DB_READ_MS, isTransientDbError } from "./db.js";
 import { listCollection } from "./cms.js";
 import { FALLBACK_BLOOD_STOCK } from "./fallbackData.js";
 
@@ -119,10 +119,19 @@ export function updateInMemoryBloodStock(stocks: Array<{ bloodGroup: string; who
 export async function getBloodStock() {
   if (!isDbOnCooldown()) {
     try {
-      const rows = await withDbTimeout(prisma.bloodStock.findMany(), 1500);
+      const rows = await withDbTimeout(prisma.bloodStock.findMany(), DB_READ_MS);
       if (rows && rows.length) {
         const order = ["O+", "A+", "B+", "AB+", "O-", "A-", "B-", "AB-"];
-        const sorted = (rows as Array<{ bloodGroup?: string | null; groupCategory?: string | null }>).sort((a: any, b: any) => {
+        // Only the 8 canonical groups are ever served publicly; legacy
+        // bare-group rows ("O"/"A"/"B"/"AB") are invalid and are hidden here
+        // until they are pruned at the next write/boot.
+        const filtered = (rows as Array<{ bloodGroup?: string | null }>).filter(
+          (r) => typeof r?.bloodGroup === "string" && order.includes(r.bloodGroup!),
+        );
+        if (!filtered.length) {
+          return inMemoryBloodStock;
+        }
+        const sorted = filtered.sort((a: any, b: any) => {
           const aGrp = typeof a?.bloodGroup === "string" ? a.bloodGroup : "";
           const bGrp = typeof b?.bloodGroup === "string" ? b.bloodGroup : "";
           const aIdx = order.indexOf(aGrp);
@@ -130,10 +139,11 @@ export async function getBloodStock() {
           return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
         });
         inMemoryBloodStock = sorted as any;
+        reportDbSuccess();
         return sorted;
       }
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
     }
   }
   return inMemoryBloodStock;

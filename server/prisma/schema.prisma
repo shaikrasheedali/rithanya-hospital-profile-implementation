@@ -124,6 +124,7 @@ model VitalLog {
   serumFerritin       Float?   @map("serum_ferritin")
   clinicalNotes       String?  @db.Text @map("clinical_notes")
   recordedByStaff     String?  @map("recorded_by_staff")
+  timeSlot            String?  @map("time_slot")
 
   @@map("vital_logs")
   @@index([patientId, recordedAt])

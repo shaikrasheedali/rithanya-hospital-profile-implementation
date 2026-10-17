@@ -1,9 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
+import {
+  prisma,
+  isDbOnCooldown,
+  reportDbError,
+  reportDbSuccess,
+  withDbTimeout,
+  DB_READ_MS,
+  DB_WRITE_MS,
+  isTransientDbError,
+} from "./db.js";
 import { getCollectionStore } from "./cms.js";
 import { phoneDigits } from "./utils.js";
+import { enqueueOutbox, outboxHasPending, registerOutboxExecutor, wakeOutbox } from "./outbox.js";
 
 export type OrderItemDTO = {
   id: string;
@@ -64,7 +74,7 @@ export async function loadOrders(): Promise<OrderDTO[]> {
           take: 300,
           include: { items: true },
         }),
-        2500
+        DB_READ_MS
       );
 
       const dbMapped: OrderDTO[] = rows.map((o) => ({
@@ -98,9 +108,10 @@ export async function loadOrders(): Promise<OrderDTO[]> {
         }
       }
       persistCache();
+      reportDbSuccess();
       return inMemoryOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
       console.warn("[orders] DB query failed, falling back to resilient in-memory store:", (err as Error)?.message || err);
     }
   }
@@ -166,9 +177,17 @@ export async function createOrder(data: {
 
   const orderId = crypto.randomUUID();
   const year = new Date().getFullYear();
-  let orderNumber = `ORD-${year}-${String(inMemoryOrders.length + 1).padStart(4, "0")}`;
-  if (inMemoryOrders.some((o) => o.orderNumber === orderNumber)) {
-    orderNumber += `-${Math.floor(Math.random() * 900 + 100)}`;
+  // Deterministic number: max existing sequence + 1 (memory reflects DB truth
+  // right after a successful DB load, so this stays stable across restarts).
+  const maxSeq = inMemoryOrders.reduce((acc, o) => {
+    const match = /^ORD-\d{4}-(\d{4})/.exec(o.orderNumber ?? "");
+    return match ? Math.max(acc, Number(match[1])) : acc;
+  }, 0);
+  let orderNumber = `ORD-${year}-${String(maxSeq + 1).padStart(4, "0")}`;
+  let seqNum = maxSeq + 1;
+  while (inMemoryOrders.some((o) => o.orderNumber === orderNumber)) {
+    seqNum += 1;
+    orderNumber = `ORD-${year}-${String(seqNum).padStart(4, "0")}`;
   }
 
   const newOrder: OrderDTO = {
@@ -189,49 +208,82 @@ export async function createOrder(data: {
   inMemoryOrders.unshift(newOrder);
   persistCache();
 
-  // Background DB sync if available
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.$transaction(async (tx) => {
-        const order = await tx.order.create({
-          data: {
-            id: orderId,
-            orderNumber,
-            customerName: newOrder.customerName,
-            phoneNumber: newOrder.phoneNumber,
-            shippingAddress: newOrder.shippingAddress,
-            pinCode: newOrder.pinCode,
-            totalAmount: total,
-            status: "PENDING",
-            paymentMethod: method,
-            isPaid: false,
-          },
-        });
-        for (const l of lines) {
-          await tx.orderItem.create({
-            data: {
-              id: l.id,
-              orderId: order.id,
-              productId: l.productId,
-              productName: l.productName,
-              quantity: l.quantity,
-              unitPrice: l.unitPrice,
-            },
-          });
-          await tx.product.update({
-            where: { id: l.productId },
-            data: { stockUnits: { decrement: l.quantity } },
-          }).catch(() => {});
-        }
-      }),
-      4000
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[orders] Background DB sync failed, order safely saved to resilient memory cache:", err?.message || err);
-    });
+  // Awaited DB write; on failure the order (with stock deltas) is queued in the
+  // durable outbox and replayed when the DB recovers.
+  const op = {
+    module: "orders",
+    action: "create",
+    key: `order:${orderId}`,
+    payload: {
+      order: {
+        id: orderId,
+        orderNumber,
+        customerName: newOrder.customerName,
+        phoneNumber: newOrder.phoneNumber,
+        shippingAddress: newOrder.shippingAddress,
+        pinCode: newOrder.pinCode,
+        totalAmount: total,
+        status: "PENDING",
+        paymentMethod: method,
+        isPaid: false,
+      },
+      items: lines,
+    },
+  };
+  if (outboxHasPending("orders") || isDbOnCooldown()) {
+    enqueueOutbox(op);
+  } else {
+    try {
+      await withDbTimeout(applyOrderCreation(op.payload as any), DB_WRITE_MS);
+      reportDbSuccess();
+      wakeOutbox();
+    } catch (err) {
+      if (isTransientDbError(err)) reportDbError(err);
+      console.warn("[orders] DB write failed — order queued for durable retry:", (err as Error)?.message || err);
+      enqueueOutbox(op);
+    }
   }
 
   return { orderNumber, total };
+}
+
+/** Idempotent order creation + stock decrement transaction (also used by outbox replay). */
+async function applyOrderCreation(payload: {
+  order: { id: string; orderNumber: string; customerName: string; phoneNumber: string; shippingAddress: string; pinCode: string; totalAmount: number; status: string; paymentMethod: string; isPaid: boolean };
+  items: OrderItemDTO[];
+}): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const order = await tx.order.create({
+      data: {
+        id: payload.order.id,
+        orderNumber: payload.order.orderNumber,
+        customerName: payload.order.customerName,
+        phoneNumber: payload.order.phoneNumber,
+        shippingAddress: payload.order.shippingAddress,
+        pinCode: payload.order.pinCode,
+        totalAmount: payload.order.totalAmount,
+        status: payload.order.status as never,
+        paymentMethod: payload.order.paymentMethod as never,
+        isPaid: payload.order.isPaid,
+      },
+    });
+    for (const l of payload.items) {
+      await tx.orderItem.create({
+        data: {
+          id: l.id,
+          orderId: order.id,
+          productId: l.productId,
+          productName: l.productName,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+        },
+      });
+      await tx.product.update({
+        where: { id: l.productId },
+        data: { stockUnits: { decrement: l.quantity } },
+      });
+    }
+  });
 }
 
 export async function updateOrderStatus(id: string, status: string): Promise<void> {
@@ -252,52 +304,122 @@ export async function updateOrderStatus(id: string, status: string): Promise<voi
   }
 
   o.status = status as OrderDTO["status"];
-  if (status !== "CANCELLED" && ["PAID", "PROCESSING", "DISPATCHED", "DELIVERED"].includes(status)) {
+  // Only an explicitly PAID order counts as paid — COD deliveries must not be
+  // auto-marked paid (PROCESSING/DISPATCHED/DELIVERED follow the payment desk).
+  if (status === "PAID") {
     o.isPaid = true;
   }
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.$transaction(async (tx) => {
-        if (status === "CANCELLED") {
-          for (const it of o.items) {
-            await tx.product.update({
-              where: { id: it.productId },
-              data: { stockUnits: { increment: it.quantity } },
-            }).catch(() => {});
-          }
-        }
-        await tx.order.update({
-          where: { id },
-          data: { status, isPaid: o.isPaid },
-        });
-      }),
-      3000
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[orders] Background DB status update failed:", err?.message || err);
-    });
+  const op = {
+    module: "orders",
+    action: "status",
+    key: `order-status:${id}`,
+    payload: { id, status, isPaid: o.isPaid, restore: status === "CANCELLED", items: o.items },
+  };
+  if (outboxHasPending("orders") || isDbOnCooldown()) {
+    enqueueOutbox(op);
+  } else {
+    try {
+      await withDbTimeout(applyOrderStatusUpdate(op.payload as any), DB_WRITE_MS);
+      reportDbSuccess();
+      wakeOutbox();
+    } catch (err) {
+      if (isTransientDbError(err)) reportDbError(err);
+      console.warn("[orders] DB status update failed — queued for durable retry:", (err as Error)?.message || err);
+      enqueueOutbox(op);
+    }
   }
+}
+
+/** Idempotent status update + stock restoration (also used by outbox replay). */
+async function applyOrderStatusUpdate(payload: {
+  id: string;
+  status: string;
+  isPaid: boolean;
+  restore: boolean;
+  items: OrderItemDTO[];
+}): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    // Read the previous DB status so replayed cancellations never double-restock.
+    const prev = await tx.order.findUnique({
+      where: { id: payload.id },
+      select: { status: true },
+    });
+    await tx.order.update({
+      where: { id: payload.id },
+      data: { status: payload.status as never, isPaid: payload.isPaid },
+    });
+    if (payload.restore && prev && prev.status !== "CANCELLED") {
+      for (const it of payload.items) {
+        await tx.product.update({
+          where: { id: it.productId },
+          data: { stockUnits: { increment: it.quantity } },
+        });
+      }
+    }
+  });
 }
 
 export async function deleteOrder(id: string): Promise<void> {
   const idx = inMemoryOrders.findIndex((x) => x.id === id);
   if (idx < 0) throw new Error("Order not found");
-  inMemoryOrders.splice(idx, 1);
+  const [removed] = inMemoryOrders.splice(idx, 1);
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.$transaction(async (tx) => {
-        await tx.orderItem.deleteMany({ where: { orderId: id } });
-        await tx.order.delete({ where: { id } });
-      }),
-      3000
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[orders] Background DB order delete failed:", err?.message || err);
-    });
+  const op = {
+    module: "orders",
+    action: "delete",
+    key: `order-delete:${id}`,
+    payload: { id, restock: removed?.status !== "CANCELLED", items: removed?.items ?? [] },
+  };
+  if (outboxHasPending("orders") || isDbOnCooldown()) {
+    enqueueOutbox(op);
+  } else {
+    try {
+      await withDbTimeout(applyOrderDeletion(op.payload as any), DB_WRITE_MS);
+      reportDbSuccess();
+      wakeOutbox();
+    } catch (err) {
+      if (isTransientDbError(err)) reportDbError(err);
+      console.warn("[orders] DB order delete failed — queued for durable retry:", (err as Error)?.message || err);
+      enqueueOutbox(op);
+    }
   }
 }
+
+async function applyOrderDeletion(payload: { id: string; restock: boolean; items: OrderItemDTO[] }): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.order.findUnique({ where: { id: payload.id }, select: { status: true } });
+    if (!existing) return; // already gone — idempotent
+    await tx.orderItem.deleteMany({ where: { orderId: payload.id } });
+    await tx.order.delete({ where: { id: payload.id } });
+    if (payload.restock && existing.status !== "CANCELLED") {
+      for (const it of payload.items) {
+        await tx.product.update({
+          where: { id: it.productId },
+          data: { stockUnits: { increment: it.quantity } },
+        });
+      }
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Durable outbox replay for orders
+// ---------------------------------------------------------------------------
+registerOutboxExecutor("orders", async (op) => {
+  if (op.action === "create") {
+    await applyOrderCreation(op.payload as never);
+    return;
+  }
+  if (op.action === "status") {
+    await applyOrderStatusUpdate(op.payload as never);
+    return;
+  }
+  if (op.action === "delete") {
+    await applyOrderDeletion(op.payload as never);
+    return;
+  }
+});
 

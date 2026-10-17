@@ -1,7 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { prisma, isDbOnCooldown, reportDbError, withDbTimeout } from "./db.js";
+import {
+  prisma,
+  isDbOnCooldown,
+  reportDbError,
+  reportDbSuccess,
+  withDbTimeout,
+  DB_READ_MS,
+  DB_WRITE_MS,
+  isTransientDbError,
+} from "./db.js";
+import { enqueueOutbox, outboxHasPending, registerOutboxExecutor, wakeOutbox } from "./outbox.js";
+import { encryptJson, decryptJson } from "./crypto.js";
 
 export type EmployeeDTO = {
   id: string;
@@ -19,7 +30,7 @@ export type EmployeeDTO = {
 
 const CACHE_FILE = path.resolve(process.cwd(), "uploads", "employees-cache.json");
 
-const SEED_EMPLOYEES: EmployeeDTO[] = [
+export const SEED_EMPLOYEES: EmployeeDTO[] = [
   {
     id: "emp-rh-narayana",
     entity: "RITHANYA_HOSPITAL",
@@ -93,8 +104,20 @@ function loadCache(): EmployeeDTO[] {
   try {
     if (fs.existsSync(CACHE_FILE)) {
       const raw = fs.readFileSync(CACHE_FILE, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      // New format: encrypted payload. Legacy: plaintext JSON array.
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = null;
+      }
+      if (!Array.isArray(parsed)) {
+        const dec = decryptJson<EmployeeDTO[]>(raw, null as unknown as EmployeeDTO[]);
+        parsed = Array.isArray(dec) ? dec : null;
+      }
+      if (Array.isArray(parsed) && (parsed as EmployeeDTO[]).length > 0) {
+        return parsed as EmployeeDTO[];
+      }
     }
   } catch (err) {
     console.warn("[employees] Could not read employees cache file:", err);
@@ -106,7 +129,8 @@ function persistCache(): void {
   try {
     const dir = path.dirname(CACHE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(inMemoryEmployees, null, 2), "utf-8");
+    // Employee records are personal data — keep the offline cache encrypted.
+    fs.writeFileSync(CACHE_FILE, encryptJson(inMemoryEmployees), "utf-8");
   } catch (err) {
     console.warn("[employees] Could not persist employees cache file:", err);
   }
@@ -122,8 +146,9 @@ export async function loadEmployees(entity: string): Promise<EmployeeDTO[]> {
           where: { entity: targetEntity },
           orderBy: { fullName: "asc" },
         }),
-        2000
+        DB_READ_MS
       );
+      reportDbSuccess();
 
       const dbMapped: EmployeeDTO[] = rows.map((e) => ({
         id: e.id,
@@ -147,7 +172,7 @@ export async function loadEmployees(entity: string): Promise<EmployeeDTO[]> {
       persistCache();
       return inMemoryEmployees.filter((e) => e.entity === targetEntity).sort((a, b) => a.fullName.localeCompare(b.fullName));
     } catch (err) {
-      reportDbError(err);
+      if (isTransientDbError(err)) reportDbError(err);
       console.warn("[employees] DB query failed, falling back to resilient in-memory store:", (err as Error)?.message || err);
     }
   }
@@ -186,30 +211,78 @@ export async function createEmployeeRecord(data: {
   inMemoryEmployees.push(newEmp);
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.employee.create({
-        data: {
-          id,
-          entity,
-          fullName: newEmp.fullName,
-          designation: newEmp.designation,
-          department: newEmp.department,
-          shiftSchedule: newEmp.shiftSchedule,
-          contactNumber: newEmp.contactNumber,
-          monthlyFixedBaseSalary: newEmp.monthlyFixedBaseSalary,
-          isActive: newEmp.isActive,
-        },
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[employees] Background DB sync failed, safely saved in memory cache:", err?.message || err);
-    });
-  }
+  await persistEmployeeWrite(
+    { module: "employees", action: "create", key: `emp:${id}`, payload: toDbEmployee(newEmp) },
+    () => prisma.employee.create({ data: toDbEmployee(newEmp) }),
+  );
 
   return newEmp;
 }
+
+function toDbEmployee(e: EmployeeDTO): {
+  id: string;
+  entity: string;
+  fullName: string;
+  designation: string;
+  department: string;
+  shiftSchedule: string;
+  contactNumber: string;
+  monthlyFixedBaseSalary: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+} {
+  return {
+    id: e.id,
+    entity: e.entity,
+    fullName: e.fullName,
+    designation: e.designation,
+    department: e.department,
+    shiftSchedule: e.shiftSchedule,
+    contactNumber: e.contactNumber,
+    monthlyFixedBaseSalary: e.monthlyFixedBaseSalary,
+    isActive: e.isActive,
+    createdAt: e.createdAt,
+    updatedAt: e.updatedAt,
+  };
+}
+
+/** Awaited employee persistence helper: DB first, durable outbox on failure. */
+async function persistEmployeeWrite(
+  op: { module: "employees"; action: "create" | "update" | "delete"; key: string; payload: unknown },
+  run: () => Promise<unknown>,
+): Promise<void> {
+  if (outboxHasPending("employees") || isDbOnCooldown()) {
+    enqueueOutbox(op);
+    return;
+  }
+  try {
+    await withDbTimeout(run(), DB_WRITE_MS);
+    reportDbSuccess();
+    wakeOutbox();
+  } catch (err) {
+    if (isTransientDbError(err)) reportDbError(err);
+    console.warn(`[employees] DB write failed (${op.action}) — queued for durable retry:`, (err as Error)?.message || err);
+    enqueueOutbox(op);
+  }
+}
+
+registerOutboxExecutor("employees", async (op) => {
+  if (op.action === "create") {
+    await prisma.employee.create({ data: op.payload as never });
+    return;
+  }
+  if (op.action === "update") {
+    const p = op.payload as { id: string; data: Record<string, unknown> };
+    await prisma.employee.update({ where: { id: p.id }, data: p.data as never });
+    return;
+  }
+  if (op.action === "delete") {
+    const p = op.payload as { id: string };
+    await prisma.employee.delete({ where: { id: p.id } });
+    return;
+  }
+});
 
 export async function updateEmployeeRecord(
   id: string,
@@ -230,8 +303,9 @@ export async function updateEmployeeRecord(
 
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
+  await persistEmployeeWrite(
+    { module: "employees", action: "update", key: `emp:${id}`, payload: { id, data } },
+    () =>
       prisma.employee.update({
         where: { id },
         data: {
@@ -245,12 +319,7 @@ export async function updateEmployeeRecord(
           ...(data.isActive !== undefined ? { isActive: emp.isActive } : {}),
         },
       }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-      console.warn("[employees] Background DB update failed:", err?.message || err);
-    });
-  }
+  );
 
   return emp;
 }
@@ -260,12 +329,10 @@ export async function deleteEmployeeRecord(id: string): Promise<void> {
   if (idx >= 0) inMemoryEmployees.splice(idx, 1);
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(prisma.employee.delete({ where: { id } }), 2500).catch((err) => {
-      reportDbError(err);
-      console.warn("[employees] Background DB delete failed:", err?.message || err);
-    });
-  }
+  await persistEmployeeWrite(
+    { module: "employees", action: "delete", key: `emp:${id}`, payload: { id } },
+    () => prisma.employee.delete({ where: { id } }),
+  );
 }
 
 export async function toggleEmployeeRecord(id: string): Promise<EmployeeDTO> {
@@ -275,17 +342,10 @@ export async function toggleEmployeeRecord(id: string): Promise<EmployeeDTO> {
   emp.updatedAt = new Date().toISOString();
   persistCache();
 
-  if (!isDbOnCooldown()) {
-    withDbTimeout(
-      prisma.employee.update({
-        where: { id },
-        data: { isActive: emp.isActive },
-      }),
-      2500
-    ).catch((err) => {
-      reportDbError(err);
-    });
-  }
+  await persistEmployeeWrite(
+    { module: "employees", action: "update", key: `emp:${id}`, payload: { id, data: { isActive: emp.isActive } } },
+    () => prisma.employee.update({ where: { id }, data: { isActive: emp.isActive } }),
+  );
 
   return emp;
 }

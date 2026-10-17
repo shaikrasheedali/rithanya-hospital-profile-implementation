@@ -1,14 +1,34 @@
 import { useEffect } from "react";
 
+/**
+ * The hospital group entity selector is persisted client-side in the
+ * `rh_entity` cookie and forwarded to every API call as the
+ * `x-rh-entity` header, so a single implementation lives here and both
+ * `api()` (lib + portal ui wrapper) send identical headers.
+ */
+export function entityHeader(): Record<string, string> {
+  try {
+    const m = typeof document !== "undefined" ? document.cookie.match(/(?:^|; )rh_entity=([^;]*)/) : null;
+    return { "x-rh-entity": m ? decodeURIComponent(m[1]) : "RITHANYA_HOSPITAL" };
+  } catch {
+    return { "x-rh-entity": "RITHANYA_HOSPITAL" };
+  }
+}
+
 export async function api<T = unknown>(
   url: string,
   method: "GET" | "POST" | "PUT" | "DELETE" = "GET",
   body?: unknown,
 ): Promise<{ ok: boolean; data?: T; error?: string }> {
   try {
+    const headers: Record<string, string> = { ...entityHeader() };
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
     const res = await fetch(url, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      headers,
+      credentials: "same-origin",
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     const json = await res.json().catch(() => ({}));
@@ -22,7 +42,7 @@ export async function api<T = unknown>(
 export async function getJson<T>(url: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(url);
+    res = await fetch(url, { headers: { ...entityHeader() }, credentials: "same-origin" });
   } catch {
     throw new Error("Network error — please check your connection and try again.");
   }

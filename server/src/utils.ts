@@ -47,7 +47,13 @@ export function sanitizeHtml(html: string): string {
     .replace(/<(script|style|iframe|object|embed|link|meta|form)\b[\s\S]*?<\/\1\s*>/gi, "")
     .replace(/<(script|style|iframe|object|embed|link|meta|form)\b[^>]*>/gi, "")
     .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    .replace(/(href|src)\s*=\s*("|')\s*javascript:[^"']*\2/gi, '$1="#"');
+    .replace(/(href|src)\s*=\s*("|')\s*javascript:[^"']*\2/gi, '$1="#"')
+    // data:text/html can execute scripts; data:image/* stays allowed so
+    // inline base64 images pasted in the rich text editor keep working.
+    .replace(/(href|src)\s*=\s*("|')\s*data:text\/html[^"']*\2/gi, '$1="#"')
+    // SVG <use xlink:href="javascript:...">-style vectors (the generic rule
+    // above already matches mid-attribute, kept explicit for readability).
+    .replace(/xlink:href\s*=\s*("|')\s*javascript:[^"']*\1/gi, 'xlink:href="#"');
 }
 
 export function stripHtml(html: string): string {

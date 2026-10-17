@@ -35,6 +35,27 @@ function secret(): Uint8Array {
   return new TextEncoder().encode(s);
 }
 
+/** Loud boot-time diagnostics for weak default secrets in production. */
+export function warnIfProductionSecretsWeak(): void {
+  if (process.env.NODE_ENV !== "production") return;
+  const hasJwt = Boolean(process.env.JWT_SECRET);
+  const hasKey = /^[0-9a-fA-F]{64}$/.test(process.env.ENCRYPTION_MASTER_KEY ?? "");
+  if (!hasJwt || !hasKey) {
+    console.warn(
+      "\n==============================================================" +
+        "\n  SECURITY WARNING" +
+        "\n  NODE_ENV=production but " +
+        (!hasJwt ? "JWT_SECRET " : "") +
+        (!hasJwt && !hasKey ? "and " : "") +
+        (!hasKey ? "ENCRYPTION_MASTER_KEY " : "") +
+        "not set." +
+        "\n  Secrets are currently derived from DATABASE_URL, which is weak." +
+        "\n  Set strong JWT_SECRET and a 64-hex ENCRYPTION_MASTER_KEY env var." +
+        "\n==============================================================\n",
+    );
+  }
+}
+
 export async function signSession(userId: string, role: Role): Promise<string> {
   return new SignJWT({ role })
     .setProtectedHeader({ alg: "HS256" })
@@ -87,58 +108,48 @@ export function computeModules(role: Role, a?: AccessRow | null): Record<ModuleK
   };
 }
 
-export const DEMO_ACCOUNTS: Record<string, { role: Role; pass: string; name: string; username: string; id: string }> = {
-  superadmin: { role: "SUPERADMIN", pass: "Hameed@2026", name: "Hospital Superadmin", username: "superadmin", id: "demo-superadmin" },
-  "mgrhameed@gmail.com": { role: "SUPERADMIN", pass: "Hameed@2026", name: "Hospital Superadmin", username: "superadmin", id: "demo-superadmin" },
-  admin: { role: "ADMIN", pass: "Rithanya@2026", name: "Administration Desk", username: "admin", id: "demo-admin" },
-  "admin@rithanyahospital.com": { role: "ADMIN", pass: "Rithanya@2026", name: "Administration Desk", username: "admin", id: "demo-admin" },
-};
-
 export const userSessionCache = new Map<string, SessionUser>();
+
+/**
+ * Cache invalidation so permission/password changes take effect immediately.
+ * Call after user updates (role change, deactivate, password reset, module
+ * matrix change) and on logout. Passing no userId clears the whole cache.
+ */
+export function invalidateUserSession(userId?: string): void {
+  if (userId) userSessionCache.delete(userId);
+  else userSessionCache.clear();
+}
 
 export async function loadUser(userId: string): Promise<SessionUser | null> {
   const cached = userSessionCache.get(userId);
   if (cached) return cached;
-
-  if (userId === "demo-superadmin") {
-    const s: SessionUser = { id: userId, username: "superadmin", fullName: "Hospital Superadmin", role: "SUPERADMIN", modules: computeModules("SUPERADMIN") };
-    userSessionCache.set(userId, s);
-    return s;
-  }
-  if (userId === "demo-admin") {
-    const s: SessionUser = { id: userId, username: "admin", fullName: "Administration Desk", role: "ADMIN", modules: computeModules("ADMIN") };
-    userSessionCache.set(userId, s);
-    return s;
-  }
-  if (userId.startsWith("demo-")) {
-    const cleanUser = userId.replace("demo-", "");
-    const role: Role = cleanUser.includes("superadmin") ? "SUPERADMIN" : cleanUser.includes("admin") ? "ADMIN" : "STAFF";
-    const s: SessionUser = {
-      id: userId,
-      username: cleanUser,
-      fullName: role === "SUPERADMIN" ? "Hospital Superadmin" : role === "ADMIN" ? "Administration Desk" : "Nursing Station Staff",
-      role,
-      modules: computeModules(role),
-    };
-    userSessionCache.set(userId, s);
-    return s;
-  }
 
   if (!isDbOnCooldown()) {
     try {
       const u = await prisma.user.findUnique({ where: { id: userId } });
       if (!u || !u.isActive) return null;
       const a = await prisma.userModuleAccess.findUnique({ where: { userId: u.id } });
-      const s: SessionUser = { id: u.id, username: u.username, fullName: u.fullName, role: u.role as Role, modules: computeModules(u.role as Role, a) };
+      const s: SessionUser = {
+        id: u.id,
+        username: u.username,
+        fullName: u.fullName,
+        role: u.role as Role,
+        modules: computeModules(u.role as Role, a),
+      };
       userSessionCache.set(userId, s);
       return s;
     } catch (err) {
+      if (Date.now() - (loadUserWarnedAt ?? 0) > 30_000) {
+        loadUserWarnedAt = Date.now();
+        console.warn("[auth] loadUser DB query failed:", err instanceof Error ? err.message : err);
+      }
       reportDbError(err);
-      console.warn("[auth] loadUser DB query failed:", err instanceof Error ? err.message : err);
     }
   }
   return null;
 }
+
+let loadUserWarnedAt = 0;
 
 export async function getSessionFromReq(req: Request): Promise<SessionUser | null> {
   const token = (req as unknown as { cookies?: Record<string, string> }).cookies?.[SESSION_COOKIE];

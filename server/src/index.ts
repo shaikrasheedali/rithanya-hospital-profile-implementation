@@ -7,8 +7,10 @@ import helmet from "helmet";
 import morgan from "morgan";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
-import { prisma, withDbTimeout } from "./db.js";
-import { ensureBaseData, ensureSeed } from "./seed.js";
+import { prisma, withDbTimeout, DB_READ_MS } from "./db.js";
+import { ensureBaseData, ensureSeed, ensureColumns } from "./seed.js";
+import { loadOutbox, startOutboxTimer, wakeOutbox, outboxPendingCount } from "./outbox.js";
+import { warnIfProductionSecretsWeak } from "./auth.js";
 import { runRetentionPurge } from "./retention.js";
 import authRoutes from "./routes/auth.js";
 import publicRoutes from "./routes/public.js";
@@ -27,7 +29,14 @@ app.use(cookieParser());
 app.use(express.json({ limit: "12mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 10 } });
+// Media + DPDP proof uploads are stored in memory and written straight to
+// disk/DB; 120MB per file accommodates raw video takes without rejecting the
+// clinic's existing library re-uploads.
+const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB ?? "120");
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024, files: 10 },
+});
 
 // ---------- API ----------
 app.get("/api/health", async (_req, res) => {
@@ -40,7 +49,7 @@ app.get("/api/health", async (_req, res) => {
 });
 
 // Basic abuse protection for public write endpoints.
-const publicWriteLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+const publicWriteLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false });
 app.use("/api/public/appointments", publicWriteLimiter);
 app.use("/api/public/orders", publicWriteLimiter);
 app.use("/api/public/dpdp", publicWriteLimiter);
@@ -117,7 +126,7 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
   if (req.path.startsWith("/api/")) {
     if (err instanceof multer.MulterError) {
       if (err.code === "LIMIT_FILE_SIZE") {
-        res.status(413).json({ error: "File too large — max 10MB per file." });
+        res.status(413).json({ error: `File too large — max ${MAX_UPLOAD_MB}MB per file.` });
         return;
       }
       res.status(400).json({ error: "Upload failed — please try again." });
@@ -132,21 +141,40 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
 
 // ---------- Boot ----------
 async function boot() {
+  // Loud boot-time diagnostics for weak production secrets.
+  warnIfProductionSecretsWeak();
+
+  // Load any writes queued while the app was down BEFORE seeding/reading so
+  // the durable outbox takes precedence over boot-time reconciliation.
+  await loadOutbox();
+  if (outboxPendingCount() > 0) {
+    console.log(`[server] Outbox holds ${outboxPendingCount()} write(s) queued from before restart — will replay.`);
+  }
+
   const server = app.listen(PORT, () => {
     console.log(`[server] Rithanya Hospital API + frontend listening on http://localhost:${PORT}`);
   });
 
   try {
+    // Ensure additive schema columns (vital_logs.time_slot) before seeding.
+    await ensureColumns();
     await ensureSeed();
-    console.log("[server] Database base data and demo collections verified.");
+    console.log("[server] Database base data and collections verified.");
+    // Drain anything the outbox collected while the DB was down.
+    wakeOutbox();
   } catch (e) {
     console.warn("[server] Notice: Could not connect to database on boot:", e instanceof Error ? e.message : e);
   }
+
+  // Periodic drain: replays queued writes every 60s (also drained immediately
+  // after any successful DB operation).
+  startOutboxTimer();
 
   // Retention purge on boot + every 24h (never touches EMR/vitals)
   runRetentionPurge().catch((e) => console.error(e));
   const timer = setInterval(() => runRetentionPurge().catch((e) => console.error(e)), 24 * 3600 * 1000);
   (timer as unknown as { unref?: () => void }).unref?.();
+  return server;
 }
 
 boot().catch((e) => {

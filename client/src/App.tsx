@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { lazy, Suspense } from "react";
 import SiteLayout from "@/pages/site/SiteLayout";
 import HomePage from "@/pages/site/Home";
 import AboutPage from "@/pages/site/About";
@@ -20,32 +21,43 @@ import TermsPage from "@/pages/site/Terms";
 import DisclaimerPage from "@/pages/site/Disclaimer";
 import DpdpPage from "@/pages/site/Dpdp";
 import BloodBankPublicPage from "@/pages/site/BloodBank";
-import PortalLayout from "@/pages/portal/PortalLayout";
-import PortalLoginPage from "@/pages/portal/Login";
-import DashboardPage from "@/pages/portal/Dashboard";
-import AppointmentsPage from "@/pages/portal/Appointments";
-import InpatientsPage from "@/pages/portal/Inpatients";
-import OutpatientsPage from "@/pages/portal/Outpatients";
-import PatientProfilePage from "@/pages/portal/PatientProfile";
-import DischargedPage from "@/pages/portal/Discharged";
-import DiagnosisCategoriesPage from "@/pages/portal/DiagnosisCategories";
-import BloodBankPage from "@/pages/portal/BloodBank";
-import CmsCollectionPage from "@/pages/portal/CmsCollection";
-import MediaLibraryPage from "@/pages/portal/MediaLibraryPage";
-import StoreProductsPage from "@/pages/portal/StoreProducts";
-import StoreOrdersPage from "@/pages/portal/StoreOrders";
-import HrEmployeesPage from "@/pages/portal/HrEmployees";
-import HrPayrollPage from "@/pages/portal/HrPayroll";
-import PayslipPage from "@/pages/portal/Payslip";
-import FinanceLedgerPage from "@/pages/portal/FinanceLedger";
-import FinanceCategoriesPage from "@/pages/portal/FinanceCategories";
-import FinanceOverviewPage from "@/pages/portal/FinanceOverview";
-import DpdpRequestsPage from "@/pages/portal/DpdpRequests";
-import AccessUsersPage from "@/pages/portal/AccessUsers";
-import AccessPermissionsPage from "@/pages/portal/AccessPermissions";
-import SettingsMasterPage from "@/pages/portal/SettingsMaster";
-import SettingsSeoPage from "@/pages/portal/SettingsSeo";
-import SettingsAuditLogsPage from "@/pages/portal/SettingsAuditLogs";
+
+// The admin portal ships as its own chunk so the public site stays lean;
+// pages load lazily and render inside a neutral shell (no layout flash).
+const PortalLayout = lazy(() => import("@/pages/portal/PortalLayout"));
+const PortalLoginPage = lazy(() => import("@/pages/portal/Login"));
+const DashboardPage = lazy(() => import("@/pages/portal/Dashboard"));
+const AppointmentsPage = lazy(() => import("@/pages/portal/Appointments"));
+const InpatientsPage = lazy(() => import("@/pages/portal/Inpatients"));
+const OutpatientsPage = lazy(() => import("@/pages/portal/Outpatients"));
+const PatientProfilePage = lazy(() => import("@/pages/portal/PatientProfile"));
+const DischargedPage = lazy(() => import("@/pages/portal/Discharged"));
+const DiagnosisCategoriesPage = lazy(() => import("@/pages/portal/DiagnosisCategories"));
+const BloodBankPage = lazy(() => import("@/pages/portal/BloodBank"));
+const CmsCollectionPage = lazy(() => import("@/pages/portal/CmsCollection"));
+const MediaLibraryPage = lazy(() => import("@/pages/portal/MediaLibraryPage"));
+const StoreProductsPage = lazy(() => import("@/pages/portal/StoreProducts"));
+const StoreOrdersPage = lazy(() => import("@/pages/portal/StoreOrders"));
+const HrEmployeesPage = lazy(() => import("@/pages/portal/HrEmployees"));
+const HrPayrollPage = lazy(() => import("@/pages/portal/HrPayroll"));
+const PayslipPage = lazy(() => import("@/pages/portal/Payslip"));
+const FinanceLedgerPage = lazy(() => import("@/pages/portal/FinanceLedger"));
+const FinanceCategoriesPage = lazy(() => import("@/pages/portal/FinanceCategories"));
+const FinanceOverviewPage = lazy(() => import("@/pages/portal/FinanceOverview"));
+const DpdpRequestsPage = lazy(() => import("@/pages/portal/DpdpRequests"));
+const AccessUsersPage = lazy(() => import("@/pages/portal/AccessUsers"));
+const AccessPermissionsPage = lazy(() => import("@/pages/portal/AccessPermissions"));
+const SettingsMasterPage = lazy(() => import("@/pages/portal/SettingsMaster"));
+const SettingsSeoPage = lazy(() => import("@/pages/portal/SettingsSeo"));
+const SettingsAuditLogsPage = lazy(() => import("@/pages/portal/SettingsAuditLogs"));
+
+function PortalFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-white">
+      <div className="h-10 w-10 animate-spin rounded-full border-2 border-royal border-t-transparent" />
+    </div>
+  );
+}
 
 function NotFound() {
   return (
@@ -65,7 +77,8 @@ function LegacyClinicalRedirect({ kind }: { kind: string }) {
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
+      <Suspense fallback={<PortalFallback />}>
+        <Routes>
         {/* Public site */}
         <Route element={<SiteLayout />}>
           <Route index element={<HomePage />} />
@@ -102,7 +115,7 @@ export default function App() {
           <Route path="dpdp-erasure-request" element={<DpdpPage />} />
         </Route>
 
-        {/* Portal */}
+        {/* Portal (lazy chunk) */}
         <Route path="portal/login" element={<PortalLoginPage />} />
         <Route path="portal" element={<PortalLayout />}>
           <Route index element={<Navigate to="/portal/dashboard" replace />} />
@@ -134,6 +147,7 @@ export default function App() {
 
         <Route path="*" element={<NotFound />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }
