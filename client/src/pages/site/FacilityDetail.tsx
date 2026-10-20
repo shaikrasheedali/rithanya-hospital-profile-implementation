@@ -75,7 +75,7 @@ export default function FacilityDetailPage() {
       </section>
 
       <section className="mx-auto max-w-7xl px-6 py-16 sm:px-8 lg:py-24">
-        <div className="grid gap-12 lg:grid-cols-[1.7fr_1fr]">
+        <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1.7fr_1fr]">
           <div>
             <Reveal>
               <MediaGallery media={item.media} alt={item.title} />
@@ -90,7 +90,7 @@ export default function FacilityDetailPage() {
             {related.length > 0 && (
               <div className="mt-14 border-t border-line pt-10">
                 <h2 className="mb-6 font-heading text-2xl font-bold text-navy">Other Hospital Facilities</h2>
-                <div className="grid gap-5 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                   {related.map((r) => (
                     <Link
                       key={r.id}

@@ -26,7 +26,7 @@ export default function InsightDetailPage() {
       <section className="mx-auto max-w-4xl px-6 py-14">
         <Reveal><MediaGallery media={b.media} alt={b.title} /></Reveal>
         <Reveal delay={70}><div className="prose-rh mt-8" dangerouslySetInnerHTML={{ __html: b.contentHtml }} /></Reveal>
-        {related.length > 0 && <div className="mt-12 grid gap-5 sm:grid-cols-2">{related.map((r) => <Link key={r.id} to={`/insights/${r.slug}`} className="rounded-xl border border-line bg-white p-5 hover:border-royal"><h3 className="font-semibold">{r.title}</h3><p className="mt-1 line-clamp-2 text-ink/70">{r.excerpt}</p></Link>)}</div>}
+        {related.length > 0 && <div className="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2">{related.map((r) => <Link key={r.id} to={`/insights/${r.slug}`} className="rounded-xl border border-line bg-white p-5 hover:border-royal"><h3 className="font-semibold">{r.title}</h3><p className="mt-1 line-clamp-2 text-ink/70">{r.excerpt}</p></Link>)}</div>}
       </section>
     </>
   );

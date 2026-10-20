@@ -139,7 +139,7 @@ export default function HomePage() {
 
       {/* About summary */}
       <section className="mx-auto max-w-7xl px-6 py-24 sm:px-8 lg:py-32">
-        <div className="grid items-center gap-14 lg:grid-cols-2">
+        <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-2">
           <Reveal className="relative">
             <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-line shadow-xl">
               <Cover media={gallery[0]?.media} alt="Rithanya Hospital interior" className="h-full w-full object-cover" />
@@ -160,7 +160,7 @@ export default function HomePage() {
               desc="Founded by Dr. D. Narayana Murthy and Dr. A. Lakshmi Deepa, Rithanya Hospital pairs clinical excellence with the warmth of a family doctor — from diabetes care to our humanitarian Thalassemia and Sickle Cell daycare."
             />
             <Reveal delay={100}>
-              <ul className="mb-8 grid gap-4 sm:grid-cols-2">
+              <ul className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {[
                   ["4.9 / 5", "Justdial rating · 3,600+ patient reviews"],
                   ["5.0 / 5", "Across 2,300+ medical portal listings"],
@@ -209,7 +209,7 @@ export default function HomePage() {
           <SectionHeading eyebrow="Clinical specialties" title="Expert care across every need" />
           <div className="mb-12"><ArrowLink to="/clinical-care/specialties">All specialties</ArrowLink></div>
         </div>
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {specialties.map((sp, i) => (
             <Reveal key={sp.id} delay={(i % 3) * 80}>
               <Link to={`/clinical-care/specialties/${sp.slug}`} className="group block h-full overflow-hidden rounded-xl border border-line bg-white transition-all hover:-translate-y-1.5 hover:shadow-2xl">
@@ -232,7 +232,7 @@ export default function HomePage() {
       <section className="on-dark relative overflow-hidden bg-navy py-24 text-white lg:py-32" id="thalassemia">
         <div className="absolute -left-32 top-1/3 h-96 w-96 animate-float rounded-full bg-alert/20 blur-3xl" aria-hidden />
         <div className="relative mx-auto max-w-7xl px-6 sm:px-8">
-          <div className="grid items-center gap-14 lg:grid-cols-2">
+          <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-2">
             <Reveal>
               <p className="mb-3 flex items-center gap-3 text-sm font-semibold uppercase tracking-[0.18em] text-gold"><span className="h-px w-10 bg-gold" /> Flagship wing</p>
               <h2 className="text-3xl font-semibold tracking-tight !text-white sm:text-4xl lg:text-5xl">Thalassemia & Sickle Cell Daycare Transfusion Centre</h2>
@@ -262,7 +262,7 @@ export default function HomePage() {
 
           <div className="mt-20">
             <h3 className="mb-8 text-2xl font-semibold !text-white">Flagship treatments</h3>
-            <div className="grid gap-6 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
               {flagship.map((t, i) => (
                 <Reveal key={t.id} delay={i * 90}>
                   <Link to={`/clinical-care/treatments/${t.slug}`} className="group block h-full overflow-hidden rounded-xl border border-white/15 bg-white/5 transition-all hover:-translate-y-1 hover:border-gold/60 hover:bg-white/10">
@@ -286,7 +286,7 @@ export default function HomePage() {
           <SectionHeading eyebrow="Hospital services" title="Daycare, diagnostics and a pharmacy that never closes" />
           <div className="mb-12"><ArrowLink to="/clinical-care/services">All services</ArrowLink></div>
         </div>
-        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
           {services.map((sv, i) => {
             const Icon = SERVICE_ICON[sv.category] ?? Stethoscope;
             return (
@@ -332,7 +332,7 @@ export default function HomePage() {
       {/* Testimonials */}
       <section className="mx-auto max-w-7xl px-6 py-24 sm:px-8 lg:py-32">
         <SectionHeading eyebrow="Patient voices" title="Affordable, courteous, and always attentive" center />
-        <div className="grid gap-6 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
           {testimonials.map((t, i) => (
             <Reveal key={t.id} delay={i * 90}>
               <figure className="flex h-full flex-col rounded-xl border border-line bg-white p-7 shadow-sm">
@@ -358,7 +358,7 @@ export default function HomePage() {
             <SectionHeading dark eyebrow="Media gallery" title="Inside our wards, labs and camps" />
             <div className="mb-12"><ArrowLink dark to="/gallery">Open full gallery</ArrowLink></div>
           </div>
-          <div className="grid auto-rows-[200px] gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid auto-rows-[200px] grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {gallery.map((g, i) => (
               <Reveal key={g.id} delay={i * 60} className={i === 0 ? "sm:col-span-2 sm:row-span-2" : i === 3 ? "lg:col-span-2" : ""}>
                 <Link to="/gallery" className="group relative block h-full overflow-hidden rounded-xl">
@@ -374,7 +374,7 @@ export default function HomePage() {
       {/* Insurance */}
       <section className="mx-auto max-w-7xl px-6 py-24 sm:px-8 lg:py-28">
         <SectionHeading eyebrow="Cashless care" title="Empaneled insurance & scheme partners" desc="Treatment under government schemes and private insurers — our cashless desk guides you through every step." center />
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {insurance.map((p, i) => (
             <Reveal key={p.id} delay={i * 80}>
               <Link to="/insurance-providers" className="group block overflow-hidden rounded-xl border border-line bg-white transition-all hover:-translate-y-1 hover:shadow-xl">
@@ -396,7 +396,7 @@ export default function HomePage() {
             <SectionHeading eyebrow="Health insights" title="Latest from our clinicians" />
             <div className="mb-12"><ArrowLink to="/insights">All articles</ArrowLink></div>
           </div>
-          <div className="grid gap-6 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
             {blogs.posts.map((b, i) => (
               <Reveal key={b.id} delay={i * 80}>
                 <Link to={`/insights/${b.slug}`} className="group block h-full overflow-hidden rounded-xl border border-line bg-canvas transition-all hover:-translate-y-1 hover:shadow-xl">
@@ -415,7 +415,7 @@ export default function HomePage() {
 
       {/* Contact band */}
       <section className="mx-auto max-w-7xl px-6 py-24 sm:px-8">
-        <div className="grid overflow-hidden rounded-xl border border-line bg-white shadow-xl lg:grid-cols-2">
+        <div className="grid grid-cols-1 overflow-hidden rounded-xl border border-line bg-white shadow-xl lg:grid-cols-2">
           <div className="p-8 sm:p-12">
             <p className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-alert">Open 24 hours</p>
             <h2 className="text-3xl font-semibold sm:text-4xl">Visit or call us — we’re always here</h2>

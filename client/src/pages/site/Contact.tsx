@@ -16,21 +16,21 @@ export default function ContactPage() {
     <>
       <PageHero eyebrow="Contact" title="Visit, call or send a message" desc="Open 24 hours for emergency, daycare and inpatient care." />
       <section className="mx-auto max-w-7xl px-6 py-16 sm:px-8">
-        <div className="grid gap-8 lg:grid-cols-2">
-          <div className="rounded-xl border border-line bg-white p-8 shadow-sm">
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+          <div className="rounded-xl border border-line bg-white p-5 shadow-sm sm:p-8">
             <h2 className="text-2xl font-semibold">Hospital information</h2>
             <ul className="mt-6 space-y-4 text-base sm:text-lg">
               <li className="flex gap-3">
                 <MapPin className="mt-1 h-5 w-5 flex-none text-royal" />
-                <span>{s.physicalAddress}</span>
+                <span className="min-w-0 break-words">{s.physicalAddress}</span>
               </li>
               <li className="flex gap-3">
                 <Clock className="mt-1 h-5 w-5 flex-none text-royal" />
-                <span>{s.opdTimings}</span>
+                <span className="min-w-0 break-words">{s.opdTimings}</span>
               </li>
               <li className="flex gap-3">
                 <Phone className="mt-1 h-5 w-5 flex-none text-royal" />
-                <span>
+                <span className="min-w-0 break-words">
                   <a className="font-semibold text-royal hover:underline" href={telHref(s.emergencyHotline)}>
                     {prettyPhone(s.emergencyHotline)}
                   </a>
@@ -46,7 +46,7 @@ export default function ContactPage() {
               </li>
               <li className="flex gap-3">
                 <Mail className="mt-1 h-5 w-5 flex-none text-royal" />
-                <a className="font-semibold text-royal hover:underline" href={`mailto:${s.email}`}>
+                <a className="min-w-0 break-words text-[15px] font-semibold text-royal hover:underline sm:text-base" href={`mailto:${s.email}`}>
                   {s.email}
                 </a>
               </li>
@@ -54,7 +54,7 @@ export default function ContactPage() {
                 <li className="flex gap-3">
                   <MessageCircle className="mt-1 h-5 w-5 flex-none text-emerald-600" />
                   <a
-                    className="font-semibold text-emerald-700 hover:underline"
+                    className="min-w-0 break-words font-semibold text-emerald-700 hover:underline"
                     target="_blank"
                     rel="noopener noreferrer"
                     href={`https://wa.me/${s.whatsappNumber}?text=${encodeURIComponent("Hello Rithanya Hospital, I would like to enquire about appointments and treatments.")}`}
@@ -84,7 +84,7 @@ export default function ContactPage() {
             </div>
             <iframe title="Map" src="https://www.google.com/maps?q=17.2486,80.1473&z=16&output=embed" className="mt-6 h-72 w-full rounded-xl border border-line" loading="lazy" />
           </div>
-          <div className="rounded-xl border border-line bg-white p-8 shadow-sm">
+          <div className="rounded-xl border border-line bg-white p-5 shadow-sm sm:p-8">
             <h2 className="text-2xl font-semibold">Request an appointment</h2>
             <p className="mt-1 text-ink/70">We usually confirm within a few hours during OPD times.</p>
             <div className="mt-6"><AppointmentForm source="CONTACT" /></div>

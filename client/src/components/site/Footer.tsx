@@ -41,7 +41,7 @@ export function Footer({ s }: { s: Settings }) {
     <footer className="on-dark relative overflow-hidden bg-mesh text-white/85">
       <div className="bg-grid absolute inset-0 opacity-40" aria-hidden />
       <div className="relative mx-auto max-w-7xl px-6 pb-8 pt-20 sm:px-8">
-        <div className="grid gap-12 lg:grid-cols-[1.4fr_2fr]">
+        <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1.4fr_2fr]">
           <div>
             <p className="font-heading text-3xl font-semibold text-white">{s.legalName}</p>
             <p className="mt-1 text-lg text-gold" lang="te">రితన్య హాస్పిటల్</p>
@@ -58,7 +58,7 @@ export function Footer({ s }: { s: Settings }) {
               <li className="flex gap-3"><Mail className="mt-1 h-5 w-5 flex-none text-gold" /><a className="hover:text-gold" href={`mailto:${s.email}`}>{s.email}</a></li>
             </ul>
           </div>
-          <div className="grid gap-10 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-10 sm:grid-cols-3">
             {cols.map((c) => (
               <nav key={c.title} aria-label={c.title}>
                 <h2 className="mb-4 font-heading text-base font-semibold uppercase tracking-wider !text-white">{c.title}</h2>

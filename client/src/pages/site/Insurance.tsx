@@ -33,11 +33,11 @@ export default function InsurancePage() {
     <>
       <PageHero eyebrow="Cashless care" title="Insurance & scheme partners" desc="PM-JAY, Aarogyasri and private TPAs — our desk handles paperwork and pre-authorisation." />
       <section className="mx-auto max-w-7xl px-6 py-16 sm:px-8">
-        {loading ? <div className="grid gap-6 lg:grid-cols-3">{[0,1,2].map((i) => <div key={i} className="h-64 animate-pulse rounded-xl bg-line/60" />)}</div>
+        {loading ? <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">{[0,1,2].map((i) => <div key={i} className="h-64 animate-pulse rounded-xl bg-line/60" />)}</div>
         : error ? <div className="text-center"><p role="alert" className="mx-auto max-w-xl rounded-xl border border-red-200 bg-red-50 p-6 font-medium text-red-900">{error}</p><button onClick={() => window.location.reload()} className="mt-6 rounded-full bg-royal px-6 py-3 font-semibold text-white">Try again</button></div>
         : items.length === 0 ? <p className="py-10 text-center text-ink/70">No insurance partners listed right now. Please call the helpdesk for cashless assistance.</p>
         : (
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {items.map((p, i) => (
             <Reveal key={p.id} delay={i * 70}>
               <div className="h-full overflow-hidden rounded-xl border border-line bg-white">

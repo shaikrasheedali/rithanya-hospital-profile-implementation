@@ -203,7 +203,7 @@ function CartDrawer() {
             <ShoppingBag className="h-5 w-5 text-gold" />
             <h2 className="font-heading text-lg font-semibold !text-white">Pharmacy cart</h2>
           </div>
-          <button onClick={close} aria-label="Close cart" className="rounded-lg p-2 hover:bg-white/10">
+          <button onClick={close} aria-label="Close cart" className="rounded-lg p-3 hover:bg-white/10">
             <X className="h-5 w-5" />
           </button>
         </header>

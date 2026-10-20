@@ -31,7 +31,7 @@ export default function AboutPage() {
         desc="Founded by Dr. D. Narayana Murthy and Dr. A. Lakshmi Deepa — clinical excellence with the warmth of a family doctor."
       />
       <section className="mx-auto max-w-7xl px-6 py-24 sm:px-8 lg:py-32">
-        <div className="grid items-center gap-14 lg:grid-cols-2">
+        <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-2">
           <Reveal className="relative">
             <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-line shadow-xl">
               <SafeImg
@@ -79,7 +79,7 @@ export default function AboutPage() {
             desc="Featured in leading Telugu dailies for community health camps and free health-centre initiatives across Khammam district."
             center
           />
-          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-12 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {[
               {
                 title: "Eenadu Daily — 15 Mar 2023",
@@ -115,7 +115,7 @@ export default function AboutPage() {
       <section id="facilities" className="border-t border-line bg-white py-24 lg:py-28">
         <div className="mx-auto max-w-7xl px-6 sm:px-8">
           <SectionHeading eyebrow="Facilities" title="Accessible, clean and always open" center />
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {[
               ["24/7 Emergency & Observation", "Round-the-clock urgent care with observation beds and hydration therapy."],
               ["Daycare Transfusion Unit", "Calm, sanitised beds for scheduled transfusions with bedside nursing."],

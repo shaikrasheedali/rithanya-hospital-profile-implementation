@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eye, PackageCheck, Pill, Search, ShoppingBag, X } from "lucide-react";
 import { useCart } from "@/components/site/CartProvider";
 import { MediaGallery } from "@/components/site/MediaGallery";
@@ -32,6 +32,16 @@ export function ProductGrid({ products }: { products: ProductDTO[] }) {
   const [inStock, setInStock] = useState(false);
   const [quick, setQuick] = useState<ProductDTO | null>(null);
   const cats = useMemo(() => ["All", ...Array.from(new Set(products.map((p) => p.category)))], [products]);
+  useEffect(() => {
+    if (!quick) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setQuick(null);
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [quick]);
   const list = products.filter(
     (p) =>
       (cat === "All" || p.category === cat) &&
@@ -62,7 +72,7 @@ export function ProductGrid({ products }: { products: ProductDTO[] }) {
         ))}
       </div>
 
-      <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4" aria-live="polite">
+      <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4" aria-live="polite">
         {list.map((p) => {
           const out = p.stockUnits <= 0;
           return (
@@ -94,19 +104,21 @@ export function ProductGrid({ products }: { products: ProductDTO[] }) {
       {quick && (
         <div className="fixed inset-0 z-[85] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={quick.name}>
           <div className="absolute inset-0 bg-navy/60 backdrop-blur-sm" onClick={() => setQuick(null)} />
-          <div className="relative grid max-h-[92vh] w-full max-w-4xl gap-8 overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl md:grid-cols-2 md:p-8">
-            <button onClick={() => setQuick(null)} aria-label="Close" className="absolute right-3 top-3 z-10 rounded-full bg-white p-2 shadow hover:bg-canvas"><X className="h-5 w-5" /></button>
-            <MediaGallery media={quick.media} alt={quick.name} aspect="aspect-square" />
-            <div className="flex flex-col">
-              <p className="text-sm font-semibold uppercase tracking-wider text-royal">{quick.category}</p>
-              <h2 className="mt-1 text-2xl font-semibold">{quick.name}</h2>
-              <p className="mt-3 font-heading text-3xl font-bold text-navy">{formatINR(quick.price)}</p>
-              <p className="mt-4 leading-relaxed text-ink/90">{quick.description || "Quality wellness product from the Rithanya Hospital pharmacy."}</p>
-              {quick.isPrescriptionReq && <p className="mt-3 rounded-lg bg-alert/10 p-3 font-medium text-alert">Prescription required — please keep it ready at delivery.</p>}
-              <p className="mt-4 flex items-center gap-2 text-emerald-700"><PackageCheck className="h-5 w-5" /> {quick.stockUnits > 0 ? `${quick.stockUnits} units available` : "Currently out of stock"}</p>
-              <button onClick={() => { addToCart(quick); setQuick(null); }} disabled={quick.stockUnits <= 0} className="mt-auto flex items-center justify-center gap-2 rounded-full bg-royal px-6 py-3.5 font-semibold text-white hover:bg-alert disabled:bg-gray-300 disabled:text-gray-600">
-                <ShoppingBag className="h-5 w-5" /> Add to cart
-              </button>
+          <div className="relative flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <button onClick={() => setQuick(null)} aria-label="Close" className="absolute right-3 top-3 z-20 rounded-full bg-white p-3 shadow hover:bg-canvas"><X className="h-5 w-5" /></button>
+            <div className="grid min-h-0 grid-cols-1 gap-8 overflow-y-auto overscroll-contain p-6 md:grid-cols-2 md:p-8">
+              <MediaGallery media={quick.media} alt={quick.name} aspect="aspect-square" />
+              <div className="flex flex-col">
+                <p className="text-sm font-semibold uppercase tracking-wider text-royal">{quick.category}</p>
+                <h2 className="mt-1 text-2xl font-semibold">{quick.name}</h2>
+                <p className="mt-3 font-heading text-3xl font-bold text-navy">{formatINR(quick.price)}</p>
+                <p className="mt-4 leading-relaxed text-ink/90">{quick.description || "Quality wellness product from the Rithanya Hospital pharmacy."}</p>
+                {quick.isPrescriptionReq && <p className="mt-3 rounded-lg bg-alert/10 p-3 font-medium text-alert">Prescription required — please keep it ready at delivery.</p>}
+                <p className="mt-4 flex items-center gap-2 text-emerald-700"><PackageCheck className="h-5 w-5" /> {quick.stockUnits > 0 ? `${quick.stockUnits} units available` : "Currently out of stock"}</p>
+                <button onClick={() => { addToCart(quick); setQuick(null); }} disabled={quick.stockUnits <= 0} className="mt-auto flex items-center justify-center gap-2 rounded-full bg-royal px-6 py-3.5 font-semibold text-white hover:bg-alert disabled:bg-gray-300 disabled:text-gray-600">
+                  <ShoppingBag className="h-5 w-5" /> Add to cart
+                </button>
+              </div>
             </div>
           </div>
         </div>

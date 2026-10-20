@@ -20,7 +20,7 @@ export default function DoctorDetailPage() {
     <>
       <section className="on-dark bg-mesh pb-16 pt-36 text-white sm:pt-44"><div className="mx-auto max-w-7xl px-6 sm:px-8"><p className="text-sm uppercase tracking-[0.18em] text-gold"><Link to="/doctors" className="hover:text-white">Doctors</Link> / {d.department}</p><h1 className="mt-3 text-4xl font-semibold !text-white sm:text-5xl">{d.fullName}</h1><p className="mt-2 text-lg text-white/85">{d.designation} · {d.qualifications}{d.experienceYears ? ` · ${d.experienceYears}+ years` : ""}</p></div></section>
       <section className="mx-auto max-w-7xl px-6 py-16 sm:px-8">
-        <div className="grid gap-12 lg:grid-cols-[1.4fr_1fr]">
+        <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1.4fr_1fr]">
           <div>
             <Reveal><MediaGallery media={d.media} alt={d.fullName} /></Reveal>
             <Reveal delay={80}><div className="prose-rh mt-8" dangerouslySetInnerHTML={{ __html: d.biographyHtml || "" }} /></Reveal>

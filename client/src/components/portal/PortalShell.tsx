@@ -3,7 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Banknote, BedDouble, BookOpen, Building2, CalendarCheck, ClipboardList, Droplets, FileSearch, FolderTree, Gauge, Globe, HeartPulse, ImageIcon,
   Images, KeyRound, Landmark, LogOut, Menu, Newspaper, PackageSearch, Receipt, Scale, Settings2, ShieldCheck, ShoppingBag, Stethoscope,
@@ -103,6 +103,7 @@ export function PortalShell({
 }) {
   const pathname = useLocation().pathname;
   const [open, setOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [shift, setShift] = useState("");
 
   useEffect(() => {
@@ -111,6 +112,32 @@ export function PortalShell({
     return () => clearInterval(t);
   }, []);
   useEffect(() => setOpen(false), [pathname]);
+
+  // Rotating a tablet into desktop width should release the drawer + scroll lock.
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const onChange = () => desktop.matches && setOpen(false);
+    desktop.addEventListener("change", onChange);
+    return () => desktop.removeEventListener("change", onChange);
+  }, []);
+
+  // Mobile drawer: Escape closes it and the page behind stays put.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
 
   const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => !i.module || user.modules[i.module]) })).filter((g) => g.items.length);
 
@@ -165,13 +192,13 @@ export function PortalShell({
         {open && (
           <div className="fixed inset-0 z-[100] lg:hidden">
             <div className="absolute inset-0 bg-navy/60" onClick={() => setOpen(false)} />
-            <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-navy text-white">
+            <aside id="portal-nav" className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-navy text-white">
               <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
                 <div className="flex items-center gap-2.5">
                   <img src="/logo.png" alt="Rithanya HMS" className="h-8 w-8 object-contain drop-shadow" />
                   <span className="font-heading text-lg font-semibold">Rithanya HMS</span>
                 </div>
-                <button onClick={() => setOpen(false)} aria-label="Close menu" className="rounded-lg p-2 hover:bg-white/10"><X className="h-5 w-5" /></button>
+                <button onClick={() => setOpen(false)} aria-label="Close menu" className="rounded-lg p-3 hover:bg-white/10"><X className="h-5 w-5" /></button>
               </div>
               {nav}
             </aside>
@@ -181,7 +208,7 @@ export function PortalShell({
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="no-print sticky top-0 z-40 border-b border-line bg-white/95 backdrop-blur">
             <div className="flex items-center gap-3 px-4 py-3 sm:px-6">
-              <button onClick={() => setOpen(true)} aria-label="Open menu" className="rounded-lg p-2 hover:bg-canvas lg:hidden"><Menu className="h-6 w-6" /></button>
+              <button onClick={() => setOpen(true)} aria-label="Open menu" aria-expanded={open} aria-controls="portal-nav" ref={menuButtonRef} className="rounded-lg p-2.5 hover:bg-canvas lg:hidden"><Menu className="h-6 w-6" /></button>
               <p className="hidden items-center gap-2 rounded-full bg-gold/30 px-3 py-1.5 text-sm font-semibold text-navy md:flex" aria-live="polite">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-600" /> Active shift: {shift || "…"}
               </p>
@@ -193,7 +220,7 @@ export function PortalShell({
                   </div>
                   <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ${ROLE_TONE[user.role]} ${user.role === "STAFF" ? "!bg-navy" : ""}`}>{user.role}</span>
                 </div>
-                <button onClick={logout} className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-navy hover:border-alert hover:text-alert"><LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Logout</span></button>
+                <button onClick={logout} className="flex h-11 w-11 items-center justify-center gap-2 rounded-lg border border-line text-sm font-semibold text-navy hover:border-alert hover:text-alert sm:h-auto sm:w-auto sm:px-3 sm:py-2"><LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Logout</span></button>
               </div>
             </div>
             <p className="border-t border-line bg-gold/30 px-4 py-1.5 text-center text-sm font-semibold text-navy md:hidden">Active shift: {shift || "…"}</p>

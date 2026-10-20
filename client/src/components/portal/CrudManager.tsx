@@ -154,9 +154,13 @@ export function CrudManager({
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink/50" />
             <input value={q} onChange={(e) => setQ(e.target.value)} name="crud-search" placeholder={searchPlaceholder} aria-label="Search" className={`${inputCls} pl-9`} />
           </div>
+          {shown.length > 0 && <p className="mt-2 text-[11px] font-medium text-ink/50 sm:hidden">Swipe sideways to see every column →</p>}
         </div>
+        {/* `relative` keeps the sr-only header label inside this scroll box;
+            without it the absolutely positioned 1px label stretches the
+            document scroll width on phones. */}
         {shown.length === 0 ? <Empty text={rows.length ? "No matches." : `No ${singular.toLowerCase()} records yet.`} /> : (
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto overscroll-x-contain">
             <table className="w-full min-w-[40rem] text-left text-base">
               <thead className="bg-canvas text-sm text-ink/70"><tr>{columns.map((c) => <th key={c.key} scope="col" className="px-4 py-3 font-semibold">{c.label}</th>)}<th className="px-4 py-3"><span className="sr-only">Actions</span></th></tr></thead>
               <tbody className="divide-y divide-line">

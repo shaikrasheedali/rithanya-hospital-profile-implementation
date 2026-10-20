@@ -68,7 +68,7 @@ export function LanguagePicker({ dark = false }: { dark?: boolean }) {
           value={lang}
           onChange={(e) => change(e.target.value)}
           name="language"
-          className="cursor-pointer bg-transparent pr-1 outline-none [&>option]:text-navy"
+          className="cursor-pointer bg-transparent pr-1 text-base outline-none xl:text-sm [&>option]:text-navy"
           aria-label="Select language"
         >
           <option value="en">English</option>

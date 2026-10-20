@@ -68,7 +68,7 @@ export function DpdpForm() {
 
   return (
     <form onSubmit={submit} className="space-y-5 rounded-xl border border-line bg-white p-7 sm:p-9">
-      <div className="grid gap-5 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
         <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Full name of patient *</span><input name="fullName" required minLength={2} className={input} autoComplete="name" /></label>
         <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Registered mobile number *</span><input name="phoneNumber" required type="tel" inputMode="tel" className={input} autoComplete="tel" /></label>
         <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">UHID / IP / OP number</span><input name="identificationRef" placeholder="e.g. RH-2026-0001" className={input} /></label>
@@ -120,7 +120,7 @@ export function DpdpStatus() {
   }
   return (
     <form onSubmit={check} className="space-y-4 rounded-xl border border-line bg-white p-7">
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Tracking code</span><input value={code} onChange={(e) => setCode(e.target.value)} required name="trackingCode" id="dpdp-trackingCode" placeholder="DPDP-XXXXXXXX" autoComplete="off" className={input} /></label>
         <label className="block"><span className="mb-1 block text-sm font-semibold text-navy">Registered mobile</span><input value={phone} onChange={(e) => setPhone(e.target.value)} required type="tel" name="phone" id="dpdp-phone" autoComplete="tel" className={input} /></label>
       </div>

@@ -29,7 +29,7 @@ export function ClinicalHub({ data }: { data: Record<(typeof TABS)[number]["key"
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div role="tablist" aria-label="Clinical collections" className="inline-flex rounded-full border border-line bg-white p-1.5">
+        <div role="tablist" aria-label="Clinical collections" className="no-scrollbar inline-flex max-w-full overflow-x-auto overscroll-x-contain rounded-full border border-line bg-white p-1.5">
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -39,7 +39,7 @@ export function ClinicalHub({ data }: { data: Record<(typeof TABS)[number]["key"
                 setTab(t.key);
                 setCat("All");
               }}
-              className={`rounded-full px-5 py-2.5 font-semibold ${tab === t.key ? "bg-navy text-white" : "text-ink hover:text-royal"}`}
+              className={`flex-none whitespace-nowrap rounded-full px-4 py-2.5 font-semibold sm:px-5 ${tab === t.key ? "bg-navy text-white" : "text-ink hover:text-royal"}`}
             >
               {t.label} <span className="ml-1 text-sm opacity-70">{data[t.key].length}</span>
             </button>
@@ -74,7 +74,7 @@ export function ClinicalHub({ data }: { data: Record<(typeof TABS)[number]["key"
         </div>
       )}
 
-      <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3" aria-live="polite">
+      <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3" aria-live="polite">
         {filtered.map((i) => (
           <Link key={i.id} to={`/clinical-care/${tab}/${i.slug}`} className="group overflow-hidden rounded-xl border border-line bg-white transition-all hover:-translate-y-1 hover:shadow-xl">
             <div className="aspect-[16/10] overflow-hidden">

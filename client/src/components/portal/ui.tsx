@@ -61,10 +61,10 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-[120] flex items-end justify-center p-0 sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 bg-navy/60 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative flex max-h-[94vh] w-full ${w} flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl`}>
-        <header className="flex items-center justify-between border-b border-line px-6 py-4">
-          <h2 className="font-heading text-xl font-semibold">{title}</h2>
-          <button onClick={onClose} aria-label="Close" className="rounded-lg p-2 hover:bg-canvas"><X className="h-5 w-5" /></button>
+      <div className={`relative flex max-h-[94dvh] w-full ${w} flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl`}>
+        <header className="flex items-center justify-between gap-3 border-b border-line px-6 py-4">
+          <h2 className="min-w-0 break-words font-heading text-xl font-semibold">{title}</h2>
+          <button onClick={onClose} aria-label="Close" className="flex-none rounded-lg p-3 hover:bg-canvas"><X className="h-5 w-5" /></button>
         </header>
         <div className="flex-1 overflow-y-auto p-6">{children}</div>
         {footer && <footer className="flex flex-wrap justify-end gap-3 border-t border-line bg-canvas px-6 py-4">{footer}</footer>}

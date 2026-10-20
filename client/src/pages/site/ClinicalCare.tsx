@@ -52,7 +52,7 @@ export default function ClinicalCarePage() {
         {error && !data ? (
           <div className="text-center"><p role="alert" className="mx-auto max-w-xl rounded-xl border border-red-200 bg-red-50 p-6 font-medium text-red-900">{error}</p><button onClick={() => window.location.reload()} className="mt-6 rounded-full bg-royal px-6 py-3 font-semibold text-white">Try again</button></div>
         ) : !data ? (
-          <div className="animate-pulse space-y-4" aria-busy="true"><div className="h-12 rounded-full bg-line/60" /><div className="grid gap-6 sm:grid-cols-3">{[0,1,2].map((i)=><div key={i} className="h-64 rounded-xl bg-line/60" />)}</div></div>
+          <div className="animate-pulse space-y-4" aria-busy="true"><div className="h-12 rounded-full bg-line/60" /><div className="grid grid-cols-1 gap-6 sm:grid-cols-3">{[0,1,2].map((i)=><div key={i} className="h-64 rounded-xl bg-line/60" />)}</div></div>
         ) : (
           <Reveal><ClinicalHub data={data as Record<"specialties"|"treatments"|"services", HubItem[]>} /></Reveal>
         )}
@@ -66,7 +66,7 @@ export default function ClinicalCarePage() {
 
 export function ClinicalTypeBrief({ items }: { items: Raw[] }) {
   return (
-    <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
       {items.map((x, i) => (
         <Reveal key={x.id} delay={(i % 3) * 70}>
           <Link to={`/clinical-care/specialties/${x.slug}`} className="block overflow-hidden rounded-xl border border-line bg-white transition-all hover:-translate-y-1 hover:shadow-xl">

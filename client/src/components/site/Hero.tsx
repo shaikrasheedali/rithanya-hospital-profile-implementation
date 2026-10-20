@@ -21,8 +21,8 @@ export function Hero({ phone }: { phone: string }) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA]">
-      <section className="relative h-screen overflow-hidden">
+    <div className="min-h-[100svh] bg-[#F8F9FA]">
+      <section className="relative min-h-[100svh] overflow-hidden">
         {/* Plays once on page load only, then holds the very last frame */}
         <video
           ref={videoRef}
@@ -45,19 +45,19 @@ export function Hero({ phone }: { phone: string }) {
           }}
         />
 
-        <div className="relative flex h-full flex-col">
-          <div className="h-24 flex-none" aria-hidden />
-          <div className="flex flex-1 items-center justify-center px-8">
-            <div className="hero-halo -mt-10 flex flex-col items-center text-center md:-mt-20 lg:-mt-28">
+        <div className="relative flex min-h-[100svh] flex-col">
+          <div className="h-20 flex-none sm:h-24" aria-hidden />
+          <div className="hero-slot flex flex-1 items-center justify-center px-5 pb-6 sm:px-8 sm:pb-0">
+            <div className="hero-halo hero-lift -mt-2 flex flex-col items-center text-center sm:-mt-10 md:-mt-20 lg:-mt-28">
               <p className="hero-glow mb-4 text-sm font-semibold uppercase tracking-wider text-[#0D47A1]">
                 RITHANYA HOSPITAL • KHAMMAM
               </p>
               <h1 className="font-normal">
-                <span className="hero-glow block text-6xl font-normal leading-none tracking-tighter text-[#0A2540] md:text-7xl lg:text-8xl">
+                <span className="hero-glow block text-[clamp(2.75rem,12vw,6rem)] font-normal leading-none tracking-tighter text-[#0A2540]">
                   Advanced.
                 </span>
                 <span
-                  className="hero-glow block text-6xl font-normal leading-none tracking-tighter text-[#0D47A1] md:text-7xl lg:text-8xl"
+                  className="hero-glow block text-[clamp(2.75rem,12vw,6rem)] font-normal leading-none tracking-tighter text-[#0D47A1]"
                   style={{ marginTop: "-12px" }}
                 >
                   Healthcare.

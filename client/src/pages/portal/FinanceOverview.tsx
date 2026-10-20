@@ -279,8 +279,11 @@ export default function FinanceOverviewPage() {
           <Empty text="No monthly ledger entries recorded for this entity." />
         ) : (
           <div className="mt-6">
-            {/* Chart Bars Grid */}
-            <div className="flex h-56 items-end gap-2 sm:gap-3 px-2 pt-6">
+            <p className="text-[11px] font-medium text-ink/50 sm:hidden">Swipe to see all 12 months →</p>
+            {/* On phones 12 month columns cannot fit at a readable width, so the
+                chart pans horizontally instead of stretching the page. */}
+            <div className="-mx-1 overflow-x-auto overscroll-x-contain pb-1">
+              <div className="flex h-56 min-w-[34rem] items-end gap-2 px-2 pt-6 sm:gap-3">
               {data.months.map((m, idx) => {
                 const creditH = Math.max(
                   4,
@@ -345,6 +348,7 @@ export default function FinanceOverviewPage() {
                   </div>
                 );
               })}
+              </div>
             </div>
 
             {/* Hovered Month Detail Banner */}
@@ -380,18 +384,18 @@ export default function FinanceOverviewPage() {
       </Card>
 
       {/* Spending Breakdown by Category Section */}
-      <div className="mt-6 grid gap-6 lg:grid-cols-3">
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left Column (2 Cols): Visual Category Breakdown & Trajectories */}
         <div className="lg:col-span-2 space-y-6">
           <Card className="p-6">
-            <div className="flex items-center justify-between pb-4 border-b border-line">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-line">
               <div className="flex items-center gap-2">
                 <PieChart className="h-5 w-5 text-royal" />
                 <h3 className="text-lg font-bold text-navy font-heading">
                   Spending Breakdown by Cost Category
                 </h3>
               </div>
-              <span className="text-xs text-ink/65 font-medium">
+              <span className="hidden text-xs text-ink/65 font-medium sm:inline">
                 Matches /portal/finance/categories
               </span>
             </div>
@@ -495,7 +499,7 @@ export default function FinanceOverviewPage() {
               <span className="text-xs text-ink/65">Annual expense curves</span>
             </div>
 
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
               {data.byCategory.map((cat) => {
                 const maxTrend = Math.max(1, ...cat.monthlyTrend);
                 return (

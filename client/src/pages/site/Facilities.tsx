@@ -106,7 +106,7 @@ export default function FacilitiesPage() {
       {/* Facilities Collection Grid */}
       <section className="mx-auto max-w-7xl px-6 py-16 sm:px-8 lg:py-24">
         {loading ? (
-          <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
             {[0, 1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="h-96 animate-pulse rounded-2xl bg-line/60" />
             ))}
@@ -119,7 +119,7 @@ export default function FacilitiesPage() {
             text="Our infrastructure catalogue is currently synchronizing with the hospital management system. Please check back shortly."
           />
         ) : (
-          <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
             {items.map((fac, i) => (
               <Reveal key={fac.id} delay={(i % 3) * 70}>
                 <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:border-royal/30 hover:shadow-xl">

@@ -167,13 +167,19 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       {isOpen && (
         <div className="fixed inset-0 z-[90] flex items-end justify-center p-0 sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label="Book an appointment">
           <div className="absolute inset-0 bg-navy/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <div className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-line bg-white p-6 shadow-2xl sm:rounded-3xl sm:p-8">
-            <button onClick={() => setOpen(false)} aria-label="Close" className="absolute right-4 top-4 rounded-full p-2 hover:bg-canvas">
-              <X className="h-5 w-5" />
-            </button>
-            <p className="text-sm font-semibold uppercase tracking-wider text-royal">Rapid OPD booking</p>
-            <h2 className="mt-1 mb-5 text-2xl font-semibold">Book your consultation</h2>
-            <AppointmentForm defaultDepartment={dept} source={source} onDone={() => setOpen(false)} />
+          <div className="relative flex h-[92dvh] max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-line bg-white shadow-2xl sm:h-auto sm:rounded-3xl">
+            <div className="flex flex-none items-start justify-between gap-3 px-6 pt-6 sm:px-8 sm:pt-8">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold uppercase tracking-wider text-royal">Rapid OPD booking</p>
+                <h2 className="mt-1 text-2xl font-semibold">Book your consultation</h2>
+              </div>
+              <button onClick={() => setOpen(false)} aria-label="Close" className="-mr-1 -mt-1 flex-none rounded-full p-3 hover:bg-canvas">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-6 pt-5 sm:px-8 sm:pb-8">
+              <AppointmentForm defaultDepartment={dept} source={source} onDone={() => setOpen(false)} />
+            </div>
           </div>
         </div>
       )}

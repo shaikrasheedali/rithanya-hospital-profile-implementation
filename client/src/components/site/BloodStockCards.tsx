@@ -138,7 +138,7 @@ export function BloodStockCards({ initial, threshold }: { initial: StockRow[]; t
         )}
         {loadError && <span role="alert" className="w-full text-sm text-white/75">{loadError}</span>}
       </div>
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {stock.map((s) => {
           const cat = (s.groupCategory || s.bloodGroup).replace(/[+-]/g, "");
           const t = THEME[cat] ?? THEME[s.groupCategory || ""] ?? THEME.AB;

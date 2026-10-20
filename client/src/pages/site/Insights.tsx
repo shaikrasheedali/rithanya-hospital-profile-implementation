@@ -82,10 +82,10 @@ export default function InsightsPage() {
             ))}
           </div>
         </div>
-        {loading ? <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">{[0,1,2].map((i) => <div key={i} className="h-72 animate-pulse rounded-xl bg-line/60" />)}</div>
+        {loading ? <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">{[0,1,2].map((i) => <div key={i} className="h-72 animate-pulse rounded-xl bg-line/60" />)}</div>
         : error ? <div className="text-center"><p role="alert" className="mx-auto max-w-xl rounded-xl border border-red-200 bg-red-50 p-6 font-medium text-red-900">{error}</p><button onClick={() => window.location.reload()} className="mt-6 rounded-full bg-royal px-6 py-3 font-semibold text-white">Try again</button></div>
         : posts.length === 0 ? <EmptyState title="No articles found" text="Try a different search or category." /> : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
             {posts.map((b, i) => (
               <Reveal key={b.id} delay={(i % 3) * 70}>
                 <Link to={`/insights/${b.slug}`} className="group block h-full overflow-hidden rounded-xl border border-line bg-white hover:-translate-y-1 hover:shadow-xl">

@@ -40,14 +40,14 @@ export default function ClinicalDetailPage() {
         </div>
       </section>
       <section className="mx-auto max-w-7xl px-6 py-16 sm:px-8 lg:py-24">
-        <div className="grid gap-12 lg:grid-cols-[1.7fr_1fr]">
+        <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1.7fr_1fr]">
           <div>
             <Reveal><MediaGallery media={item.media} alt={item.title} /></Reveal>
             <Reveal delay={80}><div className="prose-rh mt-8" dangerouslySetInnerHTML={{ __html: item.contentHtml || `<p>${item.shortSummary}</p>` }} /></Reveal>
             {related.length > 0 && (
               <div className="mt-14">
                 <h2 className="mb-6 text-2xl font-semibold">Related {type}</h2>
-                <div className="grid gap-5 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                   {related.map((r) => (
                     <Link key={r.id} to={`/clinical-care/${type}/${r.slug}`} className="rounded-xl border border-line bg-white p-5 hover:border-royal hover:shadow-lg">
                       <h3 className="font-semibold text-navy">{r.title}</h3>

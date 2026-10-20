@@ -74,7 +74,7 @@ export default function BloodBankPage() {
 
         <div className="mt-8">
           {loading ? (
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
               {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
                 <div key={i} className="h-64 animate-pulse rounded-2xl bg-line/60" />
               ))}
@@ -126,7 +126,7 @@ export default function BloodBankPage() {
       {/* Thalassemia Daycare & Donor Information */}
       <section className="border-t border-line bg-canvas py-16 lg:py-24">
         <div className="mx-auto max-w-7xl px-6 sm:px-8">
-          <div className="grid gap-12 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">
             <Reveal>
               <div className="rounded-2xl border border-line bg-white p-8 shadow-sm">
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-royal/10 text-royal">

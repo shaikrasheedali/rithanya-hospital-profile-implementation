@@ -154,8 +154,8 @@ export default function TermsPage() {
             <div className="mt-4 rounded-xl border border-line bg-canvas p-5 text-sm space-y-2">
               <p className="font-bold text-navy">{s.legalName} — Medical Superintendent Desk</p>
               <p className="text-ink/75">{s.physicalAddress}</p>
-              <p className="flex items-center gap-2 text-ink/80">
-                <Phone className="h-4 w-4 text-royal" />
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-ink/80">
+                <Phone className="h-4 w-4 flex-none text-royal" />
                 <span>Emergency Hotline: </span>
                 <a className="font-semibold text-royal hover:underline" href={telHref(s.emergencyHotline)}>
                   {prettyPhone(s.emergencyHotline)}
@@ -169,10 +169,10 @@ export default function TermsPage() {
                   </>
                 )}
               </p>
-              <p className="flex items-center gap-2 text-ink/80">
-                <Mail className="h-4 w-4 text-royal" />
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-ink/80">
+                <Mail className="h-4 w-4 flex-none text-royal" />
                 <span>Administration Email: </span>
-                <a className="font-semibold text-royal hover:underline" href={`mailto:${s.email}`}>
+                <a className="min-w-0 break-words font-semibold text-royal hover:underline" href={`mailto:${s.email}`}>
                   {s.email}
                 </a>
               </p>

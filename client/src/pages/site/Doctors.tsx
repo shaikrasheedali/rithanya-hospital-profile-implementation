@@ -37,7 +37,7 @@ export default function DoctorsPage() {
         {loading ? <EmptyState title="Loading…" text="Fetching doctor profiles." />
         : error ? <div className="text-center"><p role="alert" className="mx-auto max-w-xl rounded-xl border border-red-200 bg-red-50 p-6 font-medium text-red-900">{error}</p><button onClick={() => window.location.reload()} className="mt-6 rounded-full bg-royal px-6 py-3 font-semibold text-white">Try again</button></div>
         : items.length === 0 ? <EmptyState title="No doctors found" text="Doctor profiles are being updated. Please check back shortly." /> : (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {items.map((d, i) => (
               <Reveal key={d.id} delay={(i % 3) * 70}>
                 <Link to={`/doctors/${d.slug}`} className="group block h-full overflow-hidden rounded-xl border border-line bg-white transition-all hover:-translate-y-1 hover:shadow-xl">
